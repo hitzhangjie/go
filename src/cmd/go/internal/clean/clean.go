@@ -6,15 +6,7 @@
 package clean
 
 import (
-	"context"
-	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
-
+	"bufio"
 	"cmd/go/internal/base"
 	"cmd/go/internal/cache"
 	"cmd/go/internal/cfg"
@@ -23,6 +15,14 @@ import (
 	"cmd/go/internal/modfetch"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
+	"context"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 )
 
 var CmdClean = &base.Command{
@@ -117,6 +117,11 @@ func runClean(ctx context.Context, cmd *base.Command, args []string) {
 	}
 
 	if cleanPkg {
+
+		if len(args) == 0 {
+			cleanCurrentPkg()
+		}
+
 		for _, pkg := range load.PackagesAndErrors(ctx, args) {
 			clean(pkg)
 		}
@@ -206,6 +211,28 @@ func runClean(ctx context.Context, cmd *base.Command, args []string) {
 			}
 		}
 	}
+}
+
+func cleanCurrentPkg() {
+	var mod string
+	fin, err := os.Open(modload.ModFilePath())
+	if err != nil {
+		base.Errorf("go clean, read go.mod: %v", err)
+	}
+	sc := bufio.NewScanner(fin)
+	for sc.Scan() {
+		txt := strings.TrimSpace(sc.Text())
+		prefix := "module"
+		if strings.HasPrefix(txt, prefix) {
+			mod = strings.Split(txt, " ")[1]
+		}
+	}
+	if len(mod) == 0 {
+		base.Errorf("read go.mod error")
+	}
+	b := filepath.Base(mod)
+	os.Remove(b)
+	os.Remove(b + ".exe")
 }
 
 var cleaned = map[*load.Package]bool{}
