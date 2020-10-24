@@ -300,6 +300,12 @@ func (e *Escape) stmt(n *Node) {
 		e.block(n.Nbody)
 		e.loopDepth--
 
+	case OUNTIL:
+		e.loopDepth++
+		e.discard(n.Left)
+		e.block(n.Nbody)
+		e.loopDepth--
+
 	case ORANGE:
 		// for List = range Right { Nbody }
 		e.loopDepth++

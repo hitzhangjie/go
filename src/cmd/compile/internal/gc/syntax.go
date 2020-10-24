@@ -797,6 +797,7 @@ const (
 	OEMPTY    // no-op (empty statement)
 	OFALL     // fallthrough
 	OFOR      // for Ninit; Left; Right { Nbody }
+	OUNTIL    // for Ninit; Left; { Nbody }
 	// OFORUNTIL is like OFOR, but the test (Left) is applied after the body:
 	// 	Ninit
 	// 	top: { Nbody }   // Execute the body at least once
