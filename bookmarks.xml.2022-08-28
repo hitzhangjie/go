@@ -6,6 +6,22 @@
           <BookmarkState>
             <attributes>
               <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go" />
+              <entry key="line" value="573" />
+            </attributes>
+            <option name="description" value="编译器：将基于ssa的ir（中间代码）多轮优化更新" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go" />
+              <entry key="line" value="549" />
+            </attributes>
+            <option name="description" value="编译器：将基于ast的ir转换为基于ssa的ir（中间代码）" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go" />
               <entry key="line" value="317" />
             </attributes>
             <option name="description" value="编译器：先生成ssa中间代码，然后多轮迭代更新ssa代码" />
@@ -233,8 +249,8 @@
       <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="88">
-              <caret line="318" column="19" lean-forward="true" selection-start-line="318" selection-start-column="19" selection-end-line="318" selection-end-column="19" />
+            <state relative-caret-position="524">
+              <caret line="592" column="4" selection-start-line="592" selection-start-column="4" selection-end-line="592" selection-end-column="4" />
             </state>
           </provider>
         </entry>
@@ -261,7 +277,7 @@
         <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/pgen.go">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="212">
-              <caret line="215" lean-forward="true" selection-start-line="215" selection-end-line="215" />
+              <caret line="215" selection-start-line="215" selection-end-line="215" />
             </state>
           </provider>
         </entry>
@@ -419,6 +435,7 @@
       <option value="$PROJECT_DIR$/src/cmd/compile/internal/noder/irgen.go" />
       <option value="$PROJECT_DIR$/src/cmd/compile/internal/syntax/syntax.go" />
       <option value="$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go" />
     </changedPaths>
   </component>
   <component name="IgnoredFileRootStore">
@@ -1035,8 +1052,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="88">
-          <caret line="318" column="19" lean-forward="true" selection-start-line="318" selection-start-column="19" selection-end-line="318" selection-end-column="19" />
+        <state relative-caret-position="524">
+          <caret line="592" column="4" selection-start-line="592" selection-start-column="4" selection-end-line="592" selection-end-column="4" />
         </state>
       </provider>
     </entry>
