@@ -1,0 +1,1044 @@
+<project version="4">
+  <component name="BookmarksManager">
+    <option name="groups">
+      <GroupState>
+        <option name="bookmarks">
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go" />
+              <entry key="line" value="317" />
+            </attributes>
+            <option name="description" value="编译器：先生成ssa中间代码，然后多轮迭代更新ssa代码" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/walk/stmt.go" />
+              <entry key="line" value="14" />
+            </attributes>
+            <option name="description" value="编译器：walk遍历语法树node执行一些操作" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go" />
+              <entry key="line" value="423" />
+            </attributes>
+            <option name="description" value="编译器：对各种操作的类型检查（switch-case中）" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go" />
+              <entry key="line" value="338" />
+            </attributes>
+            <option name="description" value="编译器：类型检查入口" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go" />
+              <entry key="line" value="240" />
+            </attributes>
+            <option name="description" value="编译器：类型检查入口函数" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/parser.go" />
+              <entry key="line" value="16" />
+            </attributes>
+            <option name="description" value="编译器：go语言的语法分析器" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/scanner.go" />
+              <entry key="line" value="29" />
+            </attributes>
+            <option name="description" value="编译器：go语言的词法分析器" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/nodes.go" />
+              <entry key="line" value="35" />
+            </attributes>
+            <option name="description" value="编译器：ADT的根节点对应的类型" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/parser.go" />
+              <entry key="line" value="379" />
+            </attributes>
+            <option name="description" value="编译器：根据语言文法解析源文件SourceFile结构" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/noder/noder.go" />
+              <entry key="line" value="81" />
+            </attributes>
+            <option name="description" value="编译器：类型检查并生成中间代码" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="183" />
+            </attributes>
+            <option name="description" value="编译器：词法分析从这里开始的？" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="300" />
+            </attributes>
+            <option name="description" value="编译器：消费待编译函数队列的函数，并发生成中间代码" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="294" />
+            </attributes>
+            <option name="description" value="编译器：将待编译的func放入队列等待编译" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="267" />
+            </attributes>
+            <option name="description" value="编译器：逃逸分析入口" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="211" />
+            </attributes>
+            <option name="description" value="编译器：deadcode移除" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/noder/noder.go" />
+              <entry key="line" value="58" />
+            </attributes>
+            <option name="description" value="编译器：词法分析的入口" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+              <entry key="line" value="54" />
+            </attributes>
+            <option name="description" value="编译器：编译程序入口函数" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/go/internal/work/build.go" />
+              <entry key="line" value="135" />
+            </attributes>
+            <option name="description" value="maps each disk file path (a string) to its backing file path, so that" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/debug/elf/file.go" />
+              <entry key="line" value="531" />
+            </attributes>
+            <option name="description" value="符号表读取逻辑" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1631" />
+            </attributes>
+            <option name="description" value="func (m *M) Run() (code int) {" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1710" />
+            </attributes>
+            <option name="description" value="fuzzingOk := runFuzzing(m.deps, m.fuzzTargets)" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1696" />
+            </attributes>
+            <option name="description" value="testRan, testOk := runTests(m.deps.MatchString, m...." />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1791" />
+            </attributes>
+            <option name="description" value="for i := uint(0); i &lt; *count; i++ {" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1815" />
+            </attributes>
+            <option name="description" value="for _, test := range tests {" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/testing/testing.go" />
+              <entry key="line" value="1463" />
+            </attributes>
+            <option name="description" value="go tRunner(t, f)" />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+          <BookmarkState>
+            <attributes>
+              <entry key="url" value="file://$PROJECT_DIR$/src/cmd/go/internal/load/test.go" />
+              <entry key="line" value="606" />
+            </attributes>
+            <option name="description" value="func (t *testFuncs) load(filename, pkg string, doI..." />
+            <option name="provider" value="com.intellij.ide.bookmark.providers.LineBookmarkProvider" />
+          </BookmarkState>
+        </option>
+        <option name="name" value="go" />
+      </GroupState>
+    </option>
+  </component>
+  <component name="FavoritesManager">
+    <favorites_list name="go" />
+  </component>
+  <component name="FileEditorManager">
+    <leaf SIDE_TABS_SIZE_LIMIT_KEY="-1">
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/walk/walk.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="247">
+              <caret line="42" column="10" selection-start-line="42" selection-start-column="10" selection-end-line="42" selection-end-column="10" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="88">
+              <caret line="318" column="19" lean-forward="true" selection-start-line="318" selection-start-column="19" selection-end-line="318" selection-end-column="19" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="356">
+              <caret line="300" column="16" selection-start-line="300" selection-start-column="16" selection-end-line="300" selection-end-column="16" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/compile.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="168">
+              <caret line="91" column="9" selection-start-line="91" selection-start-column="9" selection-end-line="91" selection-end-column="9" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/pgen.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="212">
+              <caret line="215" lean-forward="true" selection-start-line="215" selection-end-line="215" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="484">
+              <caret line="664" column="15" selection-start-line="664" selection-start-column="15" selection-end-line="664" selection-end-column="15" />
+              <folding>
+                <element signature="e#1954#2500#0" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/node.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="309">
+              <caret line="194" column="4" selection-start-line="194" selection-start-column="4" selection-end-line="194" selection-end-column="4" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/expr.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="-313">
+              <caret line="574" column="5" selection-start-line="574" selection-start-column="5" selection-end-line="574" selection-end-column="5" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/func.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="616">
+              <caret line="784" column="8" selection-start-line="784" selection-start-column="8" selection-end-line="784" selection-end-column="8" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/package.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="396">
+              <caret line="18" column="4" selection-start-line="18" selection-start-column="4" selection-end-line="18" selection-end-column="4" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+    </leaf>
+  </component>
+  <component name="FileTypeUsageLocalSummary">
+    <fileType name="Go">
+      <summary usageCount="238" lastUsed="1661681840846" />
+    </fileType>
+    <fileType name="HTML">
+      <summary usageCount="4" lastUsed="1659647045698" />
+    </fileType>
+  </component>
+  <component name="FindInProjectRecents">
+    <findStrings>
+      <find>m.tests</find>
+      <find>.TestMain</find>
+      <find>testmainTmpl</find>
+      <find>debugcallv</find>
+      <find>debugcallv2</find>
+      <find>loclist</find>
+      <find>runtime._type</find>
+      <find>slide</find>
+      <find>overlay</find>
+      <find>// +build</find>
+      <find>@version</find>
+      <find>pkg/mod</find>
+      <find>mod tidy</find>
+      <find>mod download</find>
+      <find>file://</find>
+      <find>file:///</find>
+      <find>goproxy-protocol.</find>
+      <find>https://git.woa.com/qbpush/migrate_appswitch/merge_requests/2</find>
+      <find>go:noescape</find>
+      <find>runtime.</find>
+      <find>freeOSMemory</find>
+      <find>scavengeall</find>
+      <find>/goroutines</find>
+      <find>typecheck(</find>
+      <find>xtop</find>
+      <find>checkmapkeys</find>
+      <find>chec</find>
+      <find>typecheck.</find>
+      <find>typecheck</find>
+      <find>walk</find>
+    </findStrings>
+    <dirStrings>
+      <dir>$PROJECT_DIR$/src/cmd/internal/buildid</dir>
+      <dir>$PROJECT_DIR$/src/cmd/link/internal/ld</dir>
+      <dir>$PROJECT_DIR$/src/debug/dwarf</dir>
+      <dir>$PROJECT_DIR$/src/runtime/internal</dir>
+      <dir>$PROJECT_DIR$/src/cmd/vendor/github.com/google/pprof/third_party/d3</dir>
+      <dir>$PROJECT_DIR$/src/os</dir>
+      <dir>$PROJECT_DIR$/src/os/signal</dir>
+      <dir>$PROJECT_DIR$/src/cmd/compile/internal/ssa</dir>
+      <dir>$PROJECT_DIR$/src/sync</dir>
+      <dir>$PROJECT_DIR$/src/net</dir>
+      <dir>$PROJECT_DIR$/src/debug</dir>
+      <dir>$PROJECT_DIR$/src/cmd/internal/goobj</dir>
+      <dir>$PROJECT_DIR$/src/debug/elf</dir>
+      <dir>$PROJECT_DIR$/src/debug/gosym</dir>
+      <dir>$PROJECT_DIR$/src/testing</dir>
+      <dir>$PROJECT_DIR$/src/cmd/go/internal/load</dir>
+      <dir>$PROJECT_DIR$/src/runtime</dir>
+      <dir>$PROJECT_DIR$/src/cmd/compile/internal/reflectdata</dir>
+      <dir>$PROJECT_DIR$/src/cmd/go/internal/work</dir>
+      <dir>$PROJECT_DIR$/src/cmd/go/internal/modget</dir>
+      <dir>$PROJECT_DIR$/src/cmd</dir>
+      <dir>$PROJECT_DIR$/src/cmd/go/internal/modload</dir>
+      <dir>$PROJECT_DIR$/src/cmd/go</dir>
+      <dir>$PROJECT_DIR$/src</dir>
+      <dir>$PROJECT_DIR$/src/plugin</dir>
+      <dir>$PROJECT_DIR$/src/cmd/trace</dir>
+      <dir>$PROJECT_DIR$</dir>
+      <dir>$PROJECT_DIR$/src/cmd/compile/internal/typecheck</dir>
+      <dir>$PROJECT_DIR$/src/cmd/compile/internal/gc</dir>
+      <dir>$PROJECT_DIR$/src/cmd/compile</dir>
+    </dirStrings>
+  </component>
+  <component name="IdeDocumentHistory">
+    <changedPaths>
+      <option value="$PROJECT_DIR$/src/sync/atomic/doc.go" />
+      <option value="$PROJECT_DIR$/src/runtime/internal/atomic/asm_amd64.s" />
+      <option value="$PROJECT_DIR$/src/runtime/sema.go" />
+      <option value="$PROJECT_DIR$/src/runtime/lockrank_off.go" />
+      <option value="$PROJECT_DIR$/src/sync/mutex.go" />
+      <option value="$PROJECT_DIR$/src/runtime/stack.go" />
+      <option value="$PROJECT_DIR$/src/runtime/runtime1.go" />
+      <option value="$PROJECT_DIR$/src/runtime/os_linux.go" />
+      <option value="$PROJECT_DIR$/src/runtime/preempt.go" />
+      <option value="$PROJECT_DIR$/src/runtime/runtime2.go" />
+      <option value="$PROJECT_DIR$/src/runtime/signal_unix.go" />
+      <option value="$PROJECT_DIR$/src/os/file_unix.go" />
+      <option value="$PROJECT_DIR$/src/runtime/mgc.go" />
+      <option value="$PROJECT_DIR$/src/debug/elf/file.go" />
+      <option value="$PROJECT_DIR$/src/cmd/go/internal/load/test.go" />
+      <option value="$PROJECT_DIR$/src/cmd/go/internal/fsys/fsys.go" />
+      <option value="$PROJECT_DIR$/src/cmd/go/internal/modfetch/proxy.go" />
+      <option value="$PROJECT_DIR$/src/runtime/proc.go" />
+      <option value="$PROJECT_DIR$/src/runtime/trace.go" />
+      <option value="$PROJECT_DIR$/src/internal/trace/goroutines.go" />
+      <option value="$PROJECT_DIR$/src/cmd/trace/goroutines.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/base/flag.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/noder/noder.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/noder/irgen.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/syntax/syntax.go" />
+      <option value="$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go" />
+    </changedPaths>
+  </component>
+  <component name="IgnoredFileRootStore">
+    <option name="generatedRoots">
+      <set>
+        <option value="$PROJECT_DIR$/.idea" />
+      </set>
+    </option>
+  </component>
+  <component name="ProjectFrameBounds" x="-103" y="23" width="1920" height="877" extendedState="6" />
+  <component name="ProjectView">
+    <navigator currentView="ProjectPane" proportions="" version="1" />
+    <panes>
+      <pane id="ProjectPane">
+        <subPane>
+          <expand>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="go" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="go" type="462c0819:PsiDirectoryNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="go" type="462c0819:PsiDirectoryNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="go" type="462c0819:PsiDirectoryNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+              <item name="trace" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="go" type="462c0819:PsiDirectoryNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="runtime" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+              <item name="compile" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+              <item name="compile" type="462c0819:PsiDirectoryNode" />
+              <item name="internal" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+              <item name="compile" type="462c0819:PsiDirectoryNode" />
+              <item name="internal" type="462c0819:PsiDirectoryNode" />
+              <item name="syntax" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="cmd" type="462c0819:PsiDirectoryNode" />
+              <item name="trace" type="462c0819:PsiDirectoryNode" />
+            </path>
+            <path>
+              <item name="go" type="b2602c69:ProjectViewProjectNode" />
+              <item name="External Libraries" type="cb654da1:ExternalLibrariesNode" />
+              <item name="Go SDK 1.18.2" type="20ee2d1f:SyntheticLibraryElementNode" />
+              <item name="src" type="462c0819:PsiDirectoryNode" />
+              <item name="runtime" type="462c0819:PsiDirectoryNode" />
+            </path>
+          </expand>
+          <select />
+        </subPane>
+      </pane>
+      <pane id="Scope" />
+    </panes>
+  </component>
+  <component name="ServiceViewManager">
+    <option name="viewStates">
+      <list>
+        <serviceView>
+          <treeState>
+            <expand />
+            <select />
+          </treeState>
+        </serviceView>
+      </list>
+    </option>
+  </component>
+  <component name="StructureViewFactory">
+    <option name="ACTIVE_ACTIONS" value=",EXPORTABILITY_SORTER,Show package structure,Show Private Members" />
+  </component>
+  <component name="TerminalArrangementManager">
+    <option name="myTabStates">
+      <TerminalTabState tabName="build" currentWorkingDirectory="$PROJECT_DIR$" commandHistoryFileName="go-history" />
+      <TerminalTabState tabName="Local" currentWorkingDirectory="$USER_HOME$/gotest/xxxx" commandHistoryFileName="go-history2" />
+    </option>
+  </component>
+  <component name="TestHistory">
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 27m 27s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 27m 43s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 28m 54s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 29m 13s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 31m 03s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 31m 48s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 37m 29s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 18h 45m 10s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="TestDump_in_cmd_compile_internal_syntax - 2020.10.24 at 19h 22m 12s.xml">
+      <configuration name="TestDump in cmd/compile/internal/syntax" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+    <history-entry file="go_test_debug_gosym - 2020.12.05 at 23h 49m 12s.xml">
+      <configuration name="go test debug/gosym" configurationId="GoTestRunConfiguration" />
+    </history-entry>
+  </component>
+  <component name="ToolWindowManager">
+    <editor active="true" />
+    <layout>
+      <window_info content_ui="combo" id="Project" order="0" sideWeight="0.39050388" visible="true" weight="0.16380209" />
+      <window_info id="Favorites" order="1" side_tool="true" weight="0.14270501" />
+      <window_info id="Commit" order="2" />
+      <window_info id="Pull Requests" order="3" show_stripe_button="false" weight="0.32960597" />
+      <window_info id="Structure" order="4" sideWeight="0.5460069" side_tool="true" weight="0.16380209" />
+      <window_info id="Learn" order="5" />
+      <window_info id="Bookmarks" order="6" sideWeight="0.6094961" side_tool="true" weight="0.16380209" />
+      <window_info anchor="bottom" id="Version Control" order="0" />
+      <window_info anchor="bottom" id="Find" order="1" weight="0.47819906" />
+      <window_info anchor="bottom" id="Event Log" order="2" show_stripe_button="false" sideWeight="0.56951994" side_tool="true" weight="0.296048" />
+      <window_info anchor="bottom" id="TODO" order="3" />
+      <window_info anchor="bottom" id="Run" order="4" sideWeight="0.50022644" visible="true" weight="0.34333098" />
+      <window_info anchor="bottom" id="Problems View" order="5" />
+      <window_info anchor="bottom" id="TeamCity" order="6" />
+      <window_info anchor="bottom" id="Debug" order="7" weight="0.4" />
+      <window_info anchor="bottom" id="Services" order="8" show_stripe_button="false" weight="0.3297362" />
+      <window_info anchor="bottom" id="Inspection" order="9" weight="0.4" />
+      <window_info anchor="bottom" id="Internal Method Tracing" order="10" />
+      <window_info anchor="bottom" id="Terminal" order="11" sideWeight="0.43048006" visible="true" weight="0.31327015" />
+      <window_info anchor="bottom" id="Database Changes" order="12" show_stripe_button="false" />
+      <window_info anchor="right" id="make" order="0" />
+      <window_info anchor="right" id="Database" order="1" />
+      <window_info anchor="right" id="Call Graph" order="2" side_tool="true" />
+      <window_info active="true" anchor="right" x="-251" y="-1035" width="1920" height="1035" id="PlantUML" order="3" type="WINDOWED" weight="0.32960597" />
+      <window_info anchor="right" id="CodeTogether" order="4" />
+      <window_info anchor="right" id="github.copilotToolWindow" order="5" />
+      <window_info anchor="right" id="documentation.v2" order="6" side_tool="true" />
+      <window_info anchor="right" id="Hierarchy" order="7" weight="0.32994792" />
+      <window_info anchor="right" id="leetcode" order="7" side_tool="true" />
+    </layout>
+    <layout-to-restore>
+      <window_info content_ui="combo" id="Project" order="0" sideWeight="0.4536842" visible="true" weight="0.18368056" />
+      <window_info id="Favorites" order="1" side_tool="true" weight="0.14270501" />
+      <window_info id="Commit" order="2" />
+      <window_info id="Pull Requests" order="3" show_stripe_button="false" weight="0.32960597" />
+      <window_info id="Structure" order="4" sideWeight="0.5463158" side_tool="true" weight="0.18020833" />
+      <window_info id="Learn" order="5" />
+      <window_info id="Bookmarks" order="6" side_tool="true" />
+      <window_info anchor="bottom" id="Version Control" order="0" />
+      <window_info anchor="bottom" id="Find" order="1" weight="0.43028572" />
+      <window_info anchor="bottom" id="Event Log" order="2" show_stripe_button="false" sideWeight="0.56951994" side_tool="true" weight="0.296048" />
+      <window_info anchor="bottom" id="TODO" order="3" />
+      <window_info anchor="bottom" id="Run" order="4" sideWeight="0.50022644" visible="true" weight="0.34333098" />
+      <window_info anchor="bottom" id="Problems View" order="5" />
+      <window_info anchor="bottom" id="TeamCity" order="6" />
+      <window_info anchor="bottom" id="Debug" order="7" weight="0.4" />
+      <window_info anchor="bottom" id="Services" order="8" show_stripe_button="false" weight="0.3297362" />
+      <window_info anchor="bottom" id="Inspection" order="9" weight="0.4" />
+      <window_info anchor="bottom" id="Internal Method Tracing" order="10" />
+      <window_info anchor="bottom" id="Terminal" order="11" sideWeight="0.43048006" weight="0.252" />
+      <window_info anchor="bottom" id="Database Changes" order="12" show_stripe_button="false" />
+      <window_info anchor="right" id="make" order="0" />
+      <window_info anchor="right" id="Database" order="1" />
+      <window_info anchor="right" id="Call Graph" order="2" side_tool="true" />
+      <window_info active="true" anchor="right" x="-251" y="-1035" width="1920" height="1035" id="PlantUML" order="3" type="WINDOWED" weight="0.32960597" />
+      <window_info anchor="right" id="CodeTogether" order="4" />
+      <window_info anchor="right" id="github.copilotToolWindow" order="5" />
+      <window_info anchor="right" id="documentation.v2" order="6" side_tool="true" />
+      <window_info anchor="right" id="leetcode" order="7" side_tool="true" />
+    </layout-to-restore>
+    <recentWindows>
+      <value>Terminal</value>
+      <value>Project</value>
+      <value>Bookmarks</value>
+      <value>Find</value>
+      <value>Hierarchy</value>
+      <value>Structure</value>
+      <value>Run</value>
+      <value>Event Log</value>
+    </recentWindows>
+  </component>
+  <component name="Trusted.Project.Settings" hasCheckedIfOldProject="true" trusted="YES" />
+  <component name="WindowStateProjectService">
+    <state x="49" y="-954" key="SettingsEditor" timestamp="1661674842383">
+      <screen x="-246" y="-1055" width="1920" height="1055" />
+    </state>
+    <state x="221" y="107" key="SettingsEditor/0.23.1440.877/-246.-1057.1920.1057@0.23.1440.877" timestamp="1658202548891" />
+    <state x="49" y="-954" key="SettingsEditor/0.25.1440.875/-246.-1055.1920.1055@-246.-1055.1920.1055" timestamp="1661674842383" />
+    <state x="221" y="109" key="SettingsEditor/0.25.1440.875@0.25.1440.875" timestamp="1661072240358" />
+    <state x="114" y="-857" width="1032" height="678" key="find.popup" timestamp="1661681217859">
+      <screen x="-246" y="-1055" width="1920" height="1055" />
+    </state>
+    <state x="270" y="187" width="774" height="563" key="find.popup/0.23.1440.877@0.23.1440.877" timestamp="1655457613475" />
+    <state x="114" y="-857" width="1032" height="678" key="find.popup/0.25.1440.875/-246.-1055.1920.1055@-246.-1055.1920.1055" timestamp="1661681217859" />
+    <state x="270" y="189" width="774" height="562" key="find.popup/0.25.1440.875/-246.-1055.1920.1055@0.25.1440.875" timestamp="1659648099413" />
+    <state x="270" y="189" width="774" height="562" key="find.popup/0.25.1440.875@0.25.1440.875" timestamp="1661084457485" />
+    <state x="535" y="-819" width="894" height="670" key="search.everywhere.popup" timestamp="1661681840896">
+      <screen x="-246" y="-1055" width="1920" height="1055" />
+    </state>
+    <state x="798" y="-1100" width="1192" height="899" key="search.everywhere.popup/0.23.1440.877/-571.-1417.2560.1417@-571.-1417.2560.1417" timestamp="1653995223039" />
+    <state x="535" y="-819" width="894" height="670" key="search.everywhere.popup/0.25.1440.875/-246.-1055.1920.1055@-246.-1055.1920.1055" timestamp="1661681840896" />
+    <state x="770" y="221" width="671" height="556" key="search.everywhere.popup/0.25.1440.875@0.25.1440.875" timestamp="1661084884226" />
+  </component>
+  <component name="editorHistoryManager">
+    <entry file="file://$PROJECT_DIR$/src/runtime/traceback.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="902" column="12" selection-start-line="902" selection-start-column="12" selection-end-line="902" selection-end-column="12" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/runtime1.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="38" column="11" selection-start-line="38" selection-start-column="11" selection-end-line="38" selection-end-column="11" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/runtime2.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="418" column="4" selection-start-line="418" selection-start-column="4" selection-end-line="418" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/proc.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="286">
+          <caret line="1275" lean-forward="true" selection-start-line="1275" selection-end-line="1275" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/stack.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="137" column="4" selection-start-line="137" selection-start-column="4" selection-end-line="137" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/preempt.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="287" column="41" selection-start-line="287" selection-start-column="41" selection-end-line="287" selection-end-column="41" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/signal_unix.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="388" selection-start-line="388" selection-end-line="388" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/stubs.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="374">
+          <caret line="23" column="5" selection-start-line="23" selection-start-column="5" selection-end-line="23" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/internal/trace/parser.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="447">
+          <caret line="97" selection-start-line="97" selection-end-line="97" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/trace/trace.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="359">
+          <caret line="310" column="27" selection-start-line="310" selection-start-column="27" selection-end-line="310" selection-end-column="27" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/debug/garbage.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="271">
+          <caret line="99" column="5" selection-start-line="99" selection-start-column="5" selection-end-line="99" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/mgcmark.go">
+      <provider selected="true" editor-type-id="text-editor" />
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/trace/main.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="8030">
+          <caret line="382" column="13" selection-start-line="382" selection-start-column="13" selection-end-line="382" selection-end-column="13" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/trace.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="14850">
+          <caret line="680" column="76" selection-start-line="680" selection-start-column="76" selection-end-line="680" selection-end-column="76" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/trace/annotations.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="6578">
+          <caret line="313" column="4" selection-start-line="313" selection-start-column="4" selection-end-line="313" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/internal/trace/goroutines.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="4048">
+          <caret line="187" column="28" selection-start-line="187" selection-start-column="28" selection-end-line="187" selection-end-column="28" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/html/template/template.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="2398">
+          <caret line="119" column="19" selection-start-line="119" selection-start-column="19" selection-end-line="119" selection-end-column="19" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/debug/stubs.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="220">
+          <caret line="12" column="16" selection-start-line="12" selection-start-column="16" selection-end-line="12" selection-end-column="16" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/mheap.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="7062">
+          <caret line="327" column="24" selection-start-line="327" selection-start-column="24" selection-end-line="327" selection-end-column="24" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/mgc.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="286">
+          <caret line="13" column="15" selection-start-line="13" selection-start-column="15" selection-end-line="13" selection-end-column="15" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/runtime/mgcscavenge.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="14828">
+          <caret line="679" column="1" selection-start-line="679" selection-start-column="1" selection-end-line="679" selection-end-column="1" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/trace/goroutines.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="176">
+          <caret line="78" column="4" selection-start-line="78" selection-start-column="4" selection-end-line="78" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/base/flag.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="635">
+          <caret line="235" column="4" selection-start-line="235" selection-start-column="4" selection-end-line="235" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/main.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="730">
+          <caret line="56" column="7" selection-start-line="56" selection-start-column="7" selection-end-line="56" selection-end-column="7" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/types/goversion.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="182">
+          <caret line="37" column="5" selection-start-line="37" selection-start-column="5" selection-end-line="37" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/abi.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="330">
+          <caret line="28" column="5" selection-start-line="28" selection-start-column="5" selection-end-line="28" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/base/base.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="572">
+          <caret line="28" column="5" selection-start-line="28" selection-start-column="5" selection-end-line="28" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/pos.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="506">
+          <caret line="23" column="5" selection-start-line="23" selection-start-column="5" selection-end-line="23" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/types2/mono_test.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="220">
+          <caret line="18" column="24" selection-start-line="18" selection-start-column="24" selection-end-line="18" selection-end-column="24" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/parser.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="242">
+          <caret line="16" column="5" selection-start-line="16" selection-start-column="5" selection-end-line="16" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/syntax.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="488">
+          <caret line="80" selection-start-line="80" selection-end-line="80" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/noder/decl.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="526">
+          <caret line="206" column="16" selection-start-line="206" selection-start-column="16" selection-end-line="206" selection-end-column="16" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/noder/irgen.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="551">
+          <caret line="86" column="9" selection-start-line="86" selection-start-column="9" selection-end-line="86" selection-end-column="9" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/noder/noder.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="772">
+          <caret line="81" column="4" selection-start-line="81" selection-start-column="4" selection-end-line="81" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/scanner.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="309">
+          <caret line="29" column="5" selection-start-line="29" selection-start-column="5" selection-end-line="29" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/source.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="605">
+          <caret line="45" column="5" selection-start-line="45" selection-start-column="5" selection-end-line="45" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/syntax/nodes.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="440">
+          <caret line="35" column="5" selection-start-line="35" selection-start-column="5" selection-end-line="35" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/mini.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="287">
+          <caret line="60" column="19" selection-start-line="60" selection-start-column="19" selection-end-line="60" selection-end-column="19" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/func.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="141">
+          <caret line="399" column="35" selection-start-line="399" selection-start-column="35" selection-end-line="399" selection-end-column="35" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/target.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="242">
+          <caret line="11" column="4" selection-start-line="11" selection-start-column="4" selection-end-line="11" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/package.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="396">
+          <caret line="18" column="4" selection-start-line="18" selection-start-column="4" selection-end-line="18" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ir/node.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="309">
+          <caret line="194" column="4" selection-start-line="194" selection-start-column="4" selection-end-line="194" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/expr.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-313">
+          <caret line="574" column="5" selection-start-line="574" selection-start-column="5" selection-end-line="574" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/typecheck.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="484">
+          <caret line="664" column="15" selection-start-line="664" selection-start-column="15" selection-end-line="664" selection-end-column="15" />
+          <folding>
+            <element signature="e#1954#2500#0" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/typecheck/func.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="616">
+          <caret line="784" column="8" selection-start-line="784" selection-start-column="8" selection-end-line="784" selection-end-column="8" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/main.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="356">
+          <caret line="300" column="16" lean-forward="true" selection-start-line="300" selection-start-column="16" selection-end-line="300" selection-end-column="16" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/pgen.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="212">
+          <caret line="215" lean-forward="true" selection-start-line="215" selection-end-line="215" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/gc/compile.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="168">
+          <caret line="91" column="9" selection-start-line="91" selection-start-column="9" selection-end-line="91" selection-end-column="9" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/walk/stmt.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="325">
+          <caret line="21" column="25" selection-start-line="21" selection-start-column="25" selection-end-line="21" selection-end-column="25" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/walk/walk.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="247">
+          <caret line="42" column="10" selection-start-line="42" selection-start-column="10" selection-end-line="42" selection-end-column="10" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/cmd/compile/internal/ssagen/ssa.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="88">
+          <caret line="318" column="19" lean-forward="true" selection-start-line="318" selection-start-column="19" selection-end-line="318" selection-end-column="19" />
+        </state>
+      </provider>
+    </entry>
+  </component>
+</project>
