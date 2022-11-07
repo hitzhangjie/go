@@ -567,6 +567,9 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	// Newly-used mappings are considered released.
 	v = h.arena.alloc(n, heapArenaBytes, &gcController.heapReleased)
 	if v != nil {
+		if n >= 1<<30 {
+			print("debugging: mmap alloc memory size:", n, ", and madvise suggest using hugepages\n")
+		}
 		size = n
 		goto mapped
 	}
@@ -840,6 +843,10 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 // Small objects are allocated from the per-P cache's free lists.
 // Large objects (> 32 kB) are allocated straight from the heap.
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	if size >= 1<<30 {
+		print("debugging: allocate memory size: ", size, ", need zeroing\n")
+
+	}
 	if gcphase == _GCmarktermination {
 		throw("mallocgc called with gcphase == _GCmarktermination")
 	}
@@ -1031,16 +1038,27 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		span.allocCount = 1
 		size = span.elemsize
 		x = unsafe.Pointer(span.base())
+		// 调查什么时候span.needzero != 0
 		if needzero && span.needzero != 0 {
 			if noscan {
+				if size >= 1<<30 {
+					print("debugging: needzero:true, span.needzero:true, delayedZeroing:true\n")
+				}
 				delayedZeroing = true
 			} else {
+				if size >= 1<<30 {
+					print("debuggin: needzero:true, span.needzero:true, delayedZeroing:false\n")
+				}
 				memclrNoHeapPointers(x, size)
 				// We've in theory cleared almost the whole span here,
 				// and could take the extra step of actually clearing
 				// the whole thing. However, don't. Any GC bits for the
 				// uncleared parts will be zero, and it's just going to
 				// be needzero = 1 once freed anyway.
+			}
+		} else {
+			if size >= 1<<30 {
+				print("debugging: needzero:true, span.needzero:false\n")
 			}
 		}
 	}

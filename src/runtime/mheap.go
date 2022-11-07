@@ -979,6 +979,9 @@ func (h *mheap) allocNeedsZero(base, npage uintptr) (needZero bool) {
 			// We still need to update zeroedBase for this arena, and
 			// potentially more arenas.
 			needZero = true
+			if npage*pageSize >= 1<<30 {
+				print("debugging: allocNeedsZero return true, because arenaBase < zeroedBase\n")
+			}
 		}
 		// We may observe arenaBase > zeroedBase if we're racing with one or more
 		// allocations which are acquiring memory directly before us in the address
@@ -1201,7 +1204,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	}
 	if s == nil {
 		// We failed to get an mspan earlier, so grab
-		// one now that we have the heap lock.
+		// one now that we have the .
 		s = h.allocMSpanLocked()
 	}
 	unlock(&h.lock)
@@ -1211,8 +1214,16 @@ HaveSpan:
 	// lock is no longer held. Initialize the span.
 	s.init(base, npages)
 	if h.allocNeedsZero(base, npages) {
+		if npages*pageSize >= 1<<30 {
+			print("debugging: span zeroing needed, span base:", base, ", end:", base+npages*pageSize, "\n")
+		}
 		s.needzero = 1
+	} else {
+		if npages*pageSize >= 1<<30 {
+			print("debugging: span zeroing not needed, span base:", base, ", end:", base+npages*pageSize, "\n")
+		}
 	}
+
 	nbytes := npages * pageSize
 	if typ.manual() {
 		s.manualFreeList = 0
@@ -1414,10 +1425,16 @@ func (h *mheap) grow(npage uintptr) (uintptr, bool) {
 		}
 
 		if uintptr(av) == h.curArena.end {
+			if ask >= 1<<30 {
+				print("debugging: the new space is contiguous with current area...just extend the space\n")
+			}
 			// The new space is contiguous with the old
 			// space, so just extend the current space.
 			h.curArena.end = uintptr(av) + asize
 		} else {
+			if ask >= 1<<30 {
+				print("debugging: the new space isn't contiguous with current area...switch to new space\n")
+			}
 			// The new space is discontiguous. Track what
 			// remains of the current space and switch to
 			// the new space. This should be rare.
@@ -1504,6 +1521,9 @@ func (h *mheap) freeSpan(s *mspan) {
 //
 //go:systemstack
 func (h *mheap) freeManual(s *mspan, typ spanAllocType) {
+	if s.npages*pageSize >= 1<<30 {
+		print("debugging: free big mspan, if reused it need zeroing, span base:", s.base(), ", end:", s.base()+s.npages*pageSize, "\n")
+	}
 	s.needzero = 1
 	lock(&h.lock)
 	h.freeSpanLocked(s, typ)
