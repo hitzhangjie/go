@@ -1,7 +1,0 @@
-{
-  "go.toolsEnvVars": {
-    "GOOS": "linux",
-    "GOARCH": "amd64",
-    "GOROOT": "/Users/zhangjie/github/go"
-  }
-}
