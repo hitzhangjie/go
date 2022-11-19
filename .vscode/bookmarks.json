@@ -1,0 +1,19 @@
+{
+	"files": [
+		{
+			"path": "src/runtime/proc.go",
+			"bookmarks": [
+				{
+					"line": 113,
+					"column": 1,
+					"label": "gmp: m0 is main thread"
+				},
+				{
+					"line": 1759,
+					"column": 46,
+					"label": "gmp: each M has g0 (stack 8m)"
+				}
+			]
+		}
+	]
+}
