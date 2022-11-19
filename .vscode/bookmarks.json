@@ -14,6 +14,56 @@
 					"label": "gmp: each M has g0 (stack 8m)"
 				}
 			]
+		},
+		{
+			"path": "src/runtime/mgc.go",
+			"bookmarks": [
+				{
+					"line": 1307,
+					"column": 4,
+					"label": "gc: how bgMarkWorker works"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcmark.go",
+			"bookmarks": [
+				{
+					"line": 251,
+					"column": 3,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 430,
+					"column": 35,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 443,
+					"column": 0,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 670,
+					"column": 17,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 1110,
+					"column": 20,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcpacer.go",
+			"bookmarks": [
+				{
+					"line": 653,
+					"column": 10,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
 		}
 	]
 }
