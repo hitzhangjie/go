@@ -1,0 +1,3 @@
+sweep值得是将mcentral中的span进行完全sweep或者部分sweep，将其还给mheap的过程以用来分配新对象
+
+scavenge是将不在使用的堆内存还给操作系统
