@@ -64,16 +64,6 @@
 					"label": "gc: how much bytes assistG scans"
 				}
 			]
-		},
-		{
-			"path": "notes/gc.md",
-			"bookmarks": [
-				{
-					"line": 12,
-					"column": 23,
-					"label": ""
-				}
-			]
 		}
 	]
 }
