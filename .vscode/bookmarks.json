@@ -224,6 +224,51 @@
 					"label": "gc: hybrid-writebarrier"
 				}
 			]
+		},
+		{
+			"path": "src/sync/mutex.go",
+			"bookmarks": [
+				{
+					"line": 33,
+					"column": 1,
+					"label": "sync.Mutex: this->sema->runtime.mutex"
+				},
+				{
+					"line": 125,
+					"column": 35,
+					"label": "sync.Mutex: spin until mutex released"
+				},
+				{
+					"line": 162,
+					"column": 2,
+					"label": "sync.Mutex: locked ok after active spin"
+				},
+				{
+					"line": 170,
+					"column": 22,
+					"label": "sync.Mutex: locked fail so try again later"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/sema.go",
+			"bookmarks": [
+				{
+					"line": 137,
+					"column": 12,
+					"label": "sync.Mutex: runtime.mutex, active spin->passive spin->futex"
+				}
+			]
+		},
+		{
+			"path": "src/internal/fuzz/mutator.go",
+			"bookmarks": [
+				{
+					"line": 55,
+					"column": 25,
+					"label": "fuzztest: how fuzz engine mutates input"
+				}
+			]
 		}
 	]
 }
