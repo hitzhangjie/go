@@ -269,6 +269,26 @@
 					"label": "fuzztest: how fuzz engine mutates input"
 				}
 			]
+		},
+		{
+			"path": "src/encoding/json/encode.go",
+			"bookmarks": [
+				{
+					"line": 1277,
+					"column": 15,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/reflect/value.go",
+			"bookmarks": [
+				{
+					"line": 3047,
+					"column": 10,
+					"label": ""
+				}
+			]
 		}
 	]
 }

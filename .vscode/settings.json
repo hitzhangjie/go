@@ -1,0 +1,13 @@
+{
+  "files.exclude": {
+    "bin,pkg": true
+  },
+  "explorer.excludeGitIgnore": true,
+  "git.ignoreLimitWarning": true,
+  "go.toolsEnvVars": {
+    "GOENV": "/root/github/go/go.env"
+  },
+  "terminal.integrated.env.linux": {
+    "GOENV": "/root/github/go/go.env"
+  }
+}
