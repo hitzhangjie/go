@@ -1,0 +1,5 @@
+{
+  "go.toolsEnvVars": {
+    "GOROOT": "/home/zhangjie/github/go"
+  }
+}

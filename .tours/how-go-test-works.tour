@@ -1,0 +1,92 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "how go test works?",
+  "steps": [
+    {
+      "file": "src/testing/testing.go",
+      "description": "MainStart is the entrypoint of testing:\n- go test -c -work, you can see the generated build actions under /tmp/<dir>,\n- you can check /tmp/<dir>/b001/_testmain.go, \n- at last, the generated code will call testing.MainStart(...).",
+      "line": 1649
+    },
+    {
+      "file": "src/testing/testing.go",
+      "description": "go test <flags> is defined here, you can check the meanings conveniently.\ngo help testflags suck.",
+      "line": 392
+    },
+    {
+      "file": "src/testing/testing.go",
+      "description": "in the generated code _testmain.go, it will call: `m := MainStart(...)`, then call your `TestMain(m)`",
+      "line": 1661
+    },
+    {
+      "file": "src/testing/testing.go",
+      "description": "you can define flags used in your testing logic, some of them may conflict with the existing ones defined in testing framework, like: -parallel.\n\nyou can use like this:\n- method1: go test -test.parallel=N1 -parallel=N2\n- method2: go test -parallel=N1 -args -parallel=N2\n\nhere, the parameters following `-args` will be passed `TestMain` to parse, so you can parse them in `TestMain` by `flag.Parse()`.\nIf you forget this, `m.Run()` will parse it for you.",
+      "line": 1673
+    },
+    {
+      "file": "src/testing/testing.go",
+      "description": "`go test -list <pattern>`, to list the matched tests",
+      "line": 1690
+    },
+    {
+      "file": "src/testing/testing.go",
+      "description": "`runTests` run `Test...` functions, \n`runFuzzTest` run `Fuzz...` functions,\n`runExamples` run `Example...` functions,\n`runBenchmarks` run `Benchmark...` functions",
+      "line": 1726
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "if we define following benchmark test:\n\n```\nfunc BenchXXX(b *testing.B) {}\n```\n\nwe could use two ways to write:\n\nmethod1: `for i := 0; i<b.N; i++ { // the logic to benchmark }`\nall iterations is run on the same goroutine, no concurrency.\n\nmethod2: `b.RunParallel(func(pb *testing.PB) { for pb.Next() { // the logic to benchmark } })`\nall iterations will distributed to `*parallel*GOMAXPROCS` goroutines, has concurrency.\n\n",
+      "line": 541
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "`Benchmark.F` is the `BenchmarkXXX` function.",
+      "line": 550
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "`main.runN(1)` run on `testing.B` once, \n\nactually, the `main.benchFunc = BenchmarkXXX` contains a for-loop,\nwhich iterate more than once.\n\nThe number of iterations is controlled by the value `main.N`, ",
+      "line": 559
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "benchFunc is an wrapper for our `BenchmarkXXX`, jump back and check this wrapper function.",
+      "line": 193
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "Yes, the wrapper function is here, dives into `b.Run` now",
+      "line": 550
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "here, our benchmark function `BenchmarkXXX` is encapsulated into a subtest, so it's called `sub`.\n\nbefore we run all the iterations, we should check if it could run success, so `sub.run1()` check if it could fail fast `b.Fatal(...)`.\nIf ok, we keep run the following iterations.\n\n`sub.run1()` will call `testing.B.runN(1)`, so `for i:=0; i<b.N; i++` will only iterate once.",
+      "line": 676
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "here, `b.duration` records the timecost of running the logic in `sub.run1()->B.runN(1)`, \nso we can calculate the value of `b.N = 1s/b.duration`.",
+      "line": 310
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "here, we now we should run `n` times, `runN(n)`",
+      "line": 334
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "`runN(n)`, set `b.N=n`, then it calls the wrapper `benchFunc(b)`, the wrapper is a for-loop, which call `BenchmarkXXX` `n` times.\n\n`StartTimer` records the mem allocations, time before and afte running the `benchFunc`, so we know the exact CPU and memory cost,\nthen we got the metrics like totaltimes, avgtimecost, avgbytesallocated, avgallocs",
+      "line": 181
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "the final test result is recorded in `b.result`.",
+      "line": 337
+    },
+    {
+      "file": "src/testing/benchmark.go",
+      "description": "we can call `b.ReportMetric(value, name)`, it will be recorded into `Extra`.\n\nbut `b.ReportMetric` isn't concurrent-safe.",
+      "line": 368
+    }
+  ],
+  "ref": "notes/go1.19"
+}
