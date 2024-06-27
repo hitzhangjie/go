@@ -14,9 +14,14 @@
 					"label": "gmp: each M has g0 (stack 8m)"
 				},
 				{
+					"line": 2508,
+					"column": 5,
+					"label": "gmp: schedule gp to run on the current M"
+				},
+				{
 					"line": 2552,
-					"column": 14,
-					"label": "gmp: find 1 runnable g"
+					"column": 9,
+					"label": "gmp: find runnable G from p.runq, sched.runq, netpoller, workstealing"
 				},
 				{
 					"line": 2587,
@@ -47,6 +52,11 @@
 					"line": 2682,
 					"column": 15,
 					"label": "gmp/gc: no g found, wakeup 1 idle Mark worker"
+				},
+				{
+					"line": 3176,
+					"column": 0,
+					"label": "gmp: find next runnable goroutine and execute"
 				}
 			]
 		},
@@ -199,6 +209,46 @@
 			"path": "src/runtime/asm_amd64.s",
 			"bookmarks": [
 				{
+					"line": 14,
+					"column": 3,
+					"label": "bootstrap: start from here if using internal linking"
+				},
+				{
+					"line": 22,
+					"column": 6,
+					"label": "bootstrap: start form here if using external linking"
+				},
+				{
+					"line": 158,
+					"column": 7,
+					"label": "bootstrap: runtime init"
+				},
+				{
+					"line": 342,
+					"column": 18,
+					"label": "bootstrap: runtime init core logic"
+				},
+				{
+					"line": 343,
+					"column": 0,
+					"label": "bootstrap: "
+				},
+				{
+					"line": 344,
+					"column": 0,
+					"label": "bootstrap: "
+				},
+				{
+					"line": 349,
+					"column": 7,
+					"label": "bootstrap: create main goroutine which will run runtime.main()"
+				},
+				{
+					"line": 353,
+					"column": 17,
+					"label": ""
+				},
+				{
 					"line": 1627,
 					"column": 36,
 					"label": "compiler: write barrier"
@@ -277,6 +327,26 @@
 					"line": 1732,
 					"column": 62,
 					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/runtime/symtab.go",
+			"bookmarks": [
+				{
+					"line": 31,
+					"column": 1,
+					"label": "pcln: runtime.Callers(skip) returns the PC of caller's CALL instruction"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/stubs.go",
+			"bookmarks": [
+				{
+					"line": 342,
+					"column": 5,
+					"label": "pcln: getcallerpc returns the caller's CALL instruction, like `CALL runtime.newproc`"
 				}
 			]
 		}
