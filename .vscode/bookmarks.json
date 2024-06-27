@@ -9,9 +9,19 @@
 					"label": "gmp: m0 is main thread"
 				},
 				{
+					"line": 170,
+					"column": 3,
+					"label": "sysmon: create sysmon thread, which schedule GC per 2 minutes"
+				},
+				{
+					"line": 1355,
+					"column": 0,
+					"label": "gmp: mstart0 is the thread entryfunc"
+				},
+				{
 					"line": 1759,
-					"column": 46,
-					"label": "gmp: each M has g0 (stack 8m)"
+					"column": 0,
+					"label": "gmp: each M has its own g0"
 				},
 				{
 					"line": 2508,
@@ -54,9 +64,29 @@
 					"label": "gmp/gc: no g found, wakeup 1 idle Mark worker"
 				},
 				{
+					"line": 3112,
+					"column": 11,
+					"label": "gmp: how and when P/Ms started when goroutines created"
+				},
+				{
+					"line": 3150,
+					"column": 2,
+					"label": "gmp: start qsize number of idle M and P"
+				},
+				{
+					"line": 3165,
+					"column": 8,
+					"label": "gmp: if current M has P, put npilde Gs into sched.runq, put remaining into p.runq, start npile P/Ms"
+				},
+				{
 					"line": 3176,
 					"column": 0,
 					"label": "gmp: find next runnable goroutine and execute"
+				},
+				{
+					"line": 4085,
+					"column": 5,
+					"label": "gmp: newproc create a goroutine"
 				}
 			]
 		},
@@ -327,6 +357,16 @@
 					"line": 1732,
 					"column": 62,
 					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/runtime/os_linux.go",
+			"bookmarks": [
+				{
+					"line": 165,
+					"column": 5,
+					"label": "gmp: newosproc create a new thread"
 				}
 			]
 		},
