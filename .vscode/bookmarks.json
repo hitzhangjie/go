@@ -19,6 +19,16 @@
 					"label": "gmp: mstart0 is the thread entryfunc"
 				},
 				{
+					"line": 1423,
+					"column": 6,
+					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
+				},
+				{
+					"line": 1431,
+					"column": 10,
+					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
+				},
+				{
 					"line": 1759,
 					"column": 0,
 					"label": "gmp: each M has its own g0"
@@ -52,6 +62,11 @@
 					"line": 2637,
 					"column": 13,
 					"label": "gmp: find 1 runnable g in netpoll"
+				},
+				{
+					"line": 2655,
+					"column": 10,
+					"label": "gmp: if spinning=true, it could steal work from any P"
 				},
 				{
 					"line": 2661,
