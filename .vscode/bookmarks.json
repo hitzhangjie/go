@@ -27,6 +27,11 @@
 					"line": 1431,
 					"column": 10,
 					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
+                },
+                {
+					"line": 1411,
+					"column": 28,
+					"label": "gmp: here gogo(g0.sched) will let M/g0 continue to mexit() to exit"
 				},
 				{
 					"line": 1759,
@@ -37,6 +42,11 @@
 					"line": 2508,
 					"column": 5,
 					"label": "gmp: schedule gp to run on the current M"
+				},
+				{
+					"line": 2222,
+					"column": 13,
+					"label": "gmp: spinning threads is limited to less than 1/2 busy Ps, exceeded ones parked"
 				},
 				{
 					"line": 2552,
