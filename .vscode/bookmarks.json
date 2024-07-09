@@ -19,6 +19,11 @@
 					"label": "gmp: mstart0 is the thread entryfunc"
 				},
 				{
+					"line": 1411,
+					"column": 28,
+					"label": "gmp: here gogo(g0.sched) will let M/g0 continue to mexit() to exit"
+				},
+				{
 					"line": 1423,
 					"column": 6,
 					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
@@ -27,11 +32,6 @@
 					"line": 1431,
 					"column": 10,
 					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
-                },
-                {
-					"line": 1411,
-					"column": 28,
-					"label": "gmp: here gogo(g0.sched) will let M/g0 continue to mexit() to exit"
 				},
 				{
 					"line": 1759,
@@ -39,14 +39,14 @@
 					"label": "gmp: each M has its own g0"
 				},
 				{
-					"line": 2508,
-					"column": 5,
-					"label": "gmp: schedule gp to run on the current M"
-				},
-				{
 					"line": 2222,
 					"column": 13,
 					"label": "gmp: spinning threads is limited to less than 1/2 busy Ps, exceeded ones parked"
+				},
+				{
+					"line": 2508,
+					"column": 5,
+					"label": "gmp: schedule gp to run on the current M"
 				},
 				{
 					"line": 2552,
@@ -107,6 +107,11 @@
 					"line": 3176,
 					"column": 0,
 					"label": "gmp: find next runnable goroutine and execute"
+				},
+				{
+					"line": 3524,
+					"column": 23,
+					"label": "gmp: M will be terminated if locked to execute G after G exits"
 				},
 				{
 					"line": 4085,
@@ -302,6 +307,11 @@
 					"line": 353,
 					"column": 17,
 					"label": ""
+				},
+				{
+					"line": 465,
+					"column": 26,
+					"label": "plan9asm: g_m actually is the field offset m in g"
 				},
 				{
 					"line": 1627,

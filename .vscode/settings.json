@@ -1,5 +1,6 @@
 {
   "go.toolsEnvVars": {
-    "GOROOT": "/home/zhangjie/github/go"
+    "GOROOT": "/home/zhangjie/github/golang/go",
+    "GOBIN": "/home/zhangjie/github/golang/go/bin"
   }
 }
