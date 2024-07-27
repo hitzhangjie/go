@@ -1,6 +1,17 @@
 {
-  "go.toolsEnvVars": {
-    "GOROOT": "/home/zhangjie/github/golang/go",
-    "GOBIN": "/home/zhangjie/github/golang/go/bin"
-  }
+    "go.alternateTools": {
+        //go1.19
+        "go": "/home/zhangjie/github/golang/go/bin/go",
+        //built by go1.19
+        "gopls": "/home/zhangjie/github/golang/gopath/bin/gopls",
+    },
+    // apply GO & PATH settings to the terminal
+    "go.terminal.activateEnvironment": true,
+    // envvars passed to the tools
+    "go.toolsEnvVars": {
+        "GOENV": "/home/zhangjie/github/golang/go/go.env",
+    },
+    // `go: install/update the tools`, the tools path
+    "go.toolsGopath": "/home/zhangjie/github/golang/gopath",
+    "go.toolsManagement.go": "/home/zhangjie/github/golang/go/bin/go",
 }
