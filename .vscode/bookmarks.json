@@ -424,6 +424,56 @@
 					"label": "pcln: getcallerpc returns the caller's CALL instruction, like `CALL runtime.newproc`"
 				}
 			]
+		},
+		{
+			"path": "src/cmd/trace/mmu.go",
+			"bookmarks": [
+				{
+					"line": 85,
+					"column": 0,
+					"label": "mmu: parse traceEvents to prepare for following MMU plot"
+				},
+				{
+					"line": 97,
+					"column": 8,
+					"label": "mmu: `go tool trace` MMU view template"
+				},
+				{
+					"line": 102,
+					"column": 5,
+					"label": "mmu: `go tool trace` MMU view data"
+				},
+				{
+					"line": 117,
+					"column": 30,
+					"label": "mmu: if window size small enough, mmu will be 0, here quikly find the window size"
+				},
+				{
+					"line": 125,
+					"column": 32,
+					"label": "mmu: detemine the maximum of window size"
+				},
+				{
+					"line": 140,
+					"column": 21,
+					"label": "mmu: select 100 samples among [min,max) time window size, and calculate MMU for them"
+				}
+			]
+		},
+		{
+			"path": "src/internal/trace/gc.go",
+			"bookmarks": [
+				{
+					"line": 159,
+					"column": 16,
+					"label": "mmu: per-goroutine view is more precise than system view, for it consider GC happens or not on each Ps"
+				},
+				{
+					"line": 179,
+					"column": 10,
+					"label": "mmu: MMU system view only cares if GC happens on any P, if happens, then MMU at this time is 0"
+				}
+			]
 		}
 	]
 }
