@@ -472,6 +472,11 @@
 					"line": 179,
 					"column": 10,
 					"label": "mmu: MMU system view only cares if GC happens on any P, if happens, then MMU at this time is 0"
+				},
+				{
+					"line": 512,
+					"column": 16,
+					"label": "mmu: MMU(window) means the minimum one utilization of all windows of this same window size"
 				}
 			]
 		}
