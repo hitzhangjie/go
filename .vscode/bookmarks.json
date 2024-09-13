@@ -434,6 +434,11 @@
 					"label": "mmu: parse traceEvents to prepare for following MMU plot"
 				},
 				{
+					"line": 89,
+					"column": 22,
+					"label": "mmu: MutatorUtilization retuns slices of utilization of each P"
+				},
+				{
 					"line": 97,
 					"column": 8,
 					"label": "mmu: `go tool trace` MMU view template"
