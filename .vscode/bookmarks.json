@@ -502,16 +502,16 @@
 					"line": 113,
 					"column": 27,
 					"label": "signal: init signal handlers"
-				},
+				}
+			]
+		},
+		{
+			"path": "src/runtime/traceback.go",
+			"bookmarks": [
 				{
-					"line": 607,
-					"column": 32,
-					"label": "signal: signal handler"
-				},
-				{
-					"line": 681,
-					"column": 13,
-					"label": ""
+					"line": 992,
+					"column": 5,
+					"label": "signal: print goroutine gp,m,mp and status info when printstack"
 				}
 			]
 		}
