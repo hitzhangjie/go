@@ -402,6 +402,11 @@
 					"line": 165,
 					"column": 5,
 					"label": "gmp: newosproc create a new thread"
+				},
+				{
+					"line": 465,
+					"column": 7,
+					"label": ""
 				}
 			]
 		},
@@ -432,11 +437,6 @@
 					"line": 85,
 					"column": 0,
 					"label": "mmu: parse traceEvents to prepare for following MMU plot"
-				},
-				{
-					"line": 89,
-					"column": 22,
-					"label": "mmu: MutatorUtilization retuns slices of utilization of each P"
 				},
 				{
 					"line": 97,
@@ -482,6 +482,36 @@
 					"line": 512,
 					"column": 16,
 					"label": "mmu: MMU(window) means the minimum one utilization of all windows of this same window size"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/signal_linux_amd64.go",
+			"bookmarks": [
+				{
+					"line": 11,
+					"column": 10,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/runtime/signal_unix.go",
+			"bookmarks": [
+				{
+					"line": 113,
+					"column": 27,
+					"label": "signal: init signal handlers"
+				},
+				{
+					"line": 607,
+					"column": 32,
+					"label": "signal: signal handler"
+				},
+				{
+					"line": 681,
+					"column": 13,
+					"label": ""
 				}
 			]
 		}
