@@ -406,7 +406,7 @@
 				{
 					"line": 465,
 					"column": 7,
-					"label": ""
+					"label": "signal: set handler for specific signum"
 				}
 			]
 		},
@@ -482,16 +482,6 @@
 					"line": 512,
 					"column": 16,
 					"label": "mmu: MMU(window) means the minimum one utilization of all windows of this same window size"
-				}
-			]
-		},
-		{
-			"path": "src/runtime/signal_linux_amd64.go",
-			"bookmarks": [
-				{
-					"line": 11,
-					"column": 10,
-					"label": ""
 				}
 			]
 		},
