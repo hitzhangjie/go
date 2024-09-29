@@ -1,0 +1,14 @@
+{
+	"files": [
+		{
+			"path": "src/net/fd_posix.go",
+			"bookmarks": [
+				{
+					"line": 95,
+					"column": 25,
+					"label": "syscall+gc: prevent fd relevant resource garbage collected during syscall"
+				}
+			]
+		}
+	]
+}
