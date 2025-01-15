@@ -1,0 +1,14 @@
+{
+  "go.toolsEnvVars": {
+    "GOOS": "linux",
+    "GOARCH": "amd64",
+    "GOPROXY": "https://goproxy.cn,direct",
+    "GOROOT": "/Users/zhangjie/Github/go"
+  },
+  "files.exclude": {
+    "{.idea,.vscode,misc,test,bin,pkg}": true
+  },
+  "files.watcherExclude": {
+    "{bin,pkg,test}": true
+  }
+}

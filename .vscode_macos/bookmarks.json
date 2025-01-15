@@ -1,0 +1,274 @@
+{
+	"files": [
+		{
+			"path": "src/runtime/proc.go",
+			"bookmarks": [
+				{
+					"line": 113,
+					"column": 1,
+					"label": "gmp: m0 is main thread"
+				},
+				{
+					"line": 1759,
+					"column": 46,
+					"label": "gmp: each M has g0 (stack 8m)"
+				},
+				{
+					"line": 2552,
+					"column": 14,
+					"label": "gmp: find 1 runnable g"
+				},
+				{
+					"line": 2587,
+					"column": 38,
+					"label": "gmp/gc: find 1 runnable GC worker"
+				},
+				{
+					"line": 2598,
+					"column": 12,
+					"label": "gmp: find 1 runnable g in globrunq"
+				},
+				{
+					"line": 2616,
+					"column": 4,
+					"label": "gmp: find 1 runnable g in runq of P"
+				},
+				{
+					"line": 2637,
+					"column": 13,
+					"label": "gmp: find 1 runnable g in netpoll"
+				},
+				{
+					"line": 2661,
+					"column": 41,
+					"label": "gmp: work-stealing, steal work from other P's"
+				},
+				{
+					"line": 2682,
+					"column": 15,
+					"label": "gmp/gc: no g found, wakeup 1 idle Mark worker"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgc.go",
+			"bookmarks": [
+				{
+					"line": 578,
+					"column": 5,
+					"label": "gc: gcStart"
+				},
+				{
+					"line": 1307,
+					"column": 4,
+					"label": "gc: how bgMarkWorker works"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcmark.go",
+			"bookmarks": [
+				{
+					"line": 251,
+					"column": 3,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 430,
+					"column": 35,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 443,
+					"column": 0,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 670,
+					"column": 17,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 1110,
+					"column": 20,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcpacer.go",
+			"bookmarks": [
+				{
+					"line": 653,
+					"column": 10,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/runtime2.go",
+			"bookmarks": [
+				{
+					"line": 709,
+					"column": 1,
+					"label": "gc: per P has a wbBuf (writebarrier buffer)"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/malloc.go",
+			"bookmarks": [
+				{
+					"line": 841,
+					"column": 10,
+					"label": "mm: how objects allocated"
+				},
+				{
+					"line": 891,
+					"column": 21,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 899,
+					"column": 16,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 905,
+					"column": 11,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 919,
+					"column": 21,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 930,
+					"column": 8,
+					"label": "mm: if allocated memspace zeroed"
+				},
+				{
+					"line": 931,
+					"column": 25,
+					"label": "mm: how objects <=32KB allocated"
+				},
+				{
+					"line": 1024,
+					"column": 8,
+					"label": "mm: how objects >32KB allocated"
+				},
+				{
+					"line": 1076,
+					"column": 9,
+					"label": "mm/gc: blackend new allocated objects during GCMark phase"
+				},
+				{
+					"line": 1136,
+					"column": 46,
+					"label": "mm/gc: how GC triggered when allocating objects"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssa/writebarrier.go",
+			"bookmarks": [
+				{
+					"line": 108,
+					"column": 6,
+					"label": "gc: generate wb for Store, Move, Zero if needed"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssa/compile.go",
+			"bookmarks": [
+				{
+					"line": 457,
+					"column": 23,
+					"label": "compiler: list of passes"
+				},
+				{
+					"line": 485,
+					"column": 28,
+					"label": "compiler/gc: writerbarrier pass"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/asm_amd64.s",
+			"bookmarks": [
+				{
+					"line": 1627,
+					"column": 36,
+					"label": "compiler: write barrier"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/gc/compile.go",
+			"bookmarks": [
+				{
+					"line": 151,
+					"column": 12,
+					"label": "compiler/gc: compile functions"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mbarrier.go",
+			"bookmarks": [
+				{
+					"line": 28,
+					"column": 19,
+					"label": "gc: hybrid-writebarrier"
+				}
+			]
+		},
+		{
+			"path": "src/sync/mutex.go",
+			"bookmarks": [
+				{
+					"line": 33,
+					"column": 1,
+					"label": "sync.Mutex: this->sema->runtime.mutex"
+				},
+				{
+					"line": 125,
+					"column": 35,
+					"label": "sync.Mutex: spin until mutex released"
+				},
+				{
+					"line": 162,
+					"column": 2,
+					"label": "sync.Mutex: locked ok after active spin"
+				},
+				{
+					"line": 170,
+					"column": 22,
+					"label": "sync.Mutex: locked fail so try again later"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/sema.go",
+			"bookmarks": [
+				{
+					"line": 137,
+					"column": 12,
+					"label": "sync.Mutex: runtime.mutex, active spin->passive spin->futex"
+				}
+			]
+		},
+		{
+			"path": "src/internal/fuzz/mutator.go",
+			"bookmarks": [
+				{
+					"line": 55,
+					"column": 25,
+					"label": "fuzztest: how fuzz engine mutates input"
+				}
+			]
+		}
+	]
+}
