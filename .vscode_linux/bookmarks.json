@@ -1,0 +1,509 @@
+{
+	"files": [
+		{
+			"path": "src/runtime/proc.go",
+			"bookmarks": [
+				{
+					"line": 113,
+					"column": 1,
+					"label": "gmp: m0 is main thread"
+				},
+				{
+					"line": 170,
+					"column": 3,
+					"label": "sysmon: create sysmon thread, which schedule GC per 2 minutes"
+				},
+				{
+					"line": 1355,
+					"column": 0,
+					"label": "gmp: mstart0 is the thread entryfunc"
+				},
+				{
+					"line": 1411,
+					"column": 28,
+					"label": "gmp: here gogo(g0.sched) will let M/g0 continue to mexit() to exit"
+				},
+				{
+					"line": 1423,
+					"column": 6,
+					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
+				},
+				{
+					"line": 1431,
+					"column": 10,
+					"label": "gmp: newm(fn, spinning), call fn() if fn!=nil, otherwise call schedule()"
+				},
+				{
+					"line": 1759,
+					"column": 0,
+					"label": "gmp: each M has its own g0"
+				},
+				{
+					"line": 2222,
+					"column": 13,
+					"label": "gmp: spinning threads is limited to less than 1/2 busy Ps, exceeded ones parked"
+				},
+				{
+					"line": 2508,
+					"column": 5,
+					"label": "gmp: schedule gp to run on the current M"
+				},
+				{
+					"line": 2552,
+					"column": 9,
+					"label": "gmp: find runnable G from p.runq, sched.runq, netpoller, workstealing"
+				},
+				{
+					"line": 2587,
+					"column": 38,
+					"label": "gmp/gc: find 1 runnable GC worker"
+				},
+				{
+					"line": 2598,
+					"column": 12,
+					"label": "gmp: find 1 runnable g in globrunq"
+				},
+				{
+					"line": 2616,
+					"column": 4,
+					"label": "gmp: find 1 runnable g in runq of P"
+				},
+				{
+					"line": 2637,
+					"column": 13,
+					"label": "gmp: find 1 runnable g in netpoll"
+				},
+				{
+					"line": 2655,
+					"column": 10,
+					"label": "gmp: if spinning=true, it could steal work from any P"
+				},
+				{
+					"line": 2661,
+					"column": 41,
+					"label": "gmp: work-stealing, steal work from other P's"
+				},
+				{
+					"line": 2682,
+					"column": 15,
+					"label": "gmp/gc: no g found, wakeup 1 idle Mark worker"
+				},
+				{
+					"line": 3112,
+					"column": 11,
+					"label": "gmp: how and when P/Ms started when goroutines created"
+				},
+				{
+					"line": 3150,
+					"column": 2,
+					"label": "gmp: start qsize number of idle M and P"
+				},
+				{
+					"line": 3165,
+					"column": 8,
+					"label": "gmp: if current M has P, put npilde Gs into sched.runq, put remaining into p.runq, start npile P/Ms"
+				},
+				{
+					"line": 3176,
+					"column": 0,
+					"label": "gmp: find next runnable goroutine and execute"
+				},
+				{
+					"line": 3524,
+					"column": 23,
+					"label": "gmp: M will be terminated if locked to execute G after G exits"
+				},
+				{
+					"line": 4085,
+					"column": 5,
+					"label": "gmp: newproc create a goroutine"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgc.go",
+			"bookmarks": [
+				{
+					"line": 578,
+					"column": 5,
+					"label": "gc: gcStart"
+				},
+				{
+					"line": 1307,
+					"column": 4,
+					"label": "gc: how bgMarkWorker works"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcmark.go",
+			"bookmarks": [
+				{
+					"line": 251,
+					"column": 3,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 430,
+					"column": 35,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 443,
+					"column": 0,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 670,
+					"column": 17,
+					"label": "gc: how much bytes assistG scans"
+				},
+				{
+					"line": 1110,
+					"column": 20,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mgcpacer.go",
+			"bookmarks": [
+				{
+					"line": 653,
+					"column": 10,
+					"label": "gc: how much bytes assistG scans"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/runtime2.go",
+			"bookmarks": [
+				{
+					"line": 709,
+					"column": 1,
+					"label": "gc: per P has a wbBuf (writebarrier buffer)"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/malloc.go",
+			"bookmarks": [
+				{
+					"line": 841,
+					"column": 10,
+					"label": "mm: how objects allocated"
+				},
+				{
+					"line": 891,
+					"column": 21,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 899,
+					"column": 16,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 905,
+					"column": 11,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 919,
+					"column": 21,
+					"label": "mm/gc: how markAssist works"
+				},
+				{
+					"line": 930,
+					"column": 8,
+					"label": "mm: if allocated memspace zeroed"
+				},
+				{
+					"line": 931,
+					"column": 25,
+					"label": "mm: how objects <=32KB allocated"
+				},
+				{
+					"line": 1024,
+					"column": 8,
+					"label": "mm: how objects >32KB allocated"
+				},
+				{
+					"line": 1076,
+					"column": 9,
+					"label": "mm/gc: blackend new allocated objects during GCMark phase"
+				},
+				{
+					"line": 1136,
+					"column": 46,
+					"label": "mm/gc: how GC triggered when allocating objects"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssa/writebarrier.go",
+			"bookmarks": [
+				{
+					"line": 108,
+					"column": 6,
+					"label": "gc: generate wb for Store, Move, Zero if needed"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssa/compile.go",
+			"bookmarks": [
+				{
+					"line": 457,
+					"column": 23,
+					"label": "compiler: list of passes"
+				},
+				{
+					"line": 485,
+					"column": 28,
+					"label": "compiler/gc: writerbarrier pass"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/asm_amd64.s",
+			"bookmarks": [
+				{
+					"line": 14,
+					"column": 3,
+					"label": "bootstrap: start from here if using internal linking"
+				},
+				{
+					"line": 22,
+					"column": 6,
+					"label": "bootstrap: start form here if using external linking"
+				},
+				{
+					"line": 158,
+					"column": 7,
+					"label": "bootstrap: runtime init"
+				},
+				{
+					"line": 342,
+					"column": 18,
+					"label": "bootstrap: runtime init core logic"
+				},
+				{
+					"line": 343,
+					"column": 0,
+					"label": "bootstrap: "
+				},
+				{
+					"line": 344,
+					"column": 0,
+					"label": "bootstrap: "
+				},
+				{
+					"line": 349,
+					"column": 7,
+					"label": "bootstrap: create main goroutine which will run runtime.main()"
+				},
+				{
+					"line": 353,
+					"column": 17,
+					"label": ""
+				},
+				{
+					"line": 465,
+					"column": 26,
+					"label": "plan9asm: g_m actually is the field offset m in g"
+				},
+				{
+					"line": 1627,
+					"column": 36,
+					"label": "compiler: write barrier"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/gc/compile.go",
+			"bookmarks": [
+				{
+					"line": 151,
+					"column": 12,
+					"label": "compiler/gc: compile functions"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/mbarrier.go",
+			"bookmarks": [
+				{
+					"line": 28,
+					"column": 19,
+					"label": "gc: hybrid-writebarrier"
+				}
+			]
+		},
+		{
+			"path": "src/sync/mutex.go",
+			"bookmarks": [
+				{
+					"line": 33,
+					"column": 1,
+					"label": "sync.Mutex: this->sema->runtime.mutex"
+				},
+				{
+					"line": 125,
+					"column": 35,
+					"label": "sync.Mutex: spin until mutex released"
+				},
+				{
+					"line": 162,
+					"column": 2,
+					"label": "sync.Mutex: locked ok after active spin"
+				},
+				{
+					"line": 170,
+					"column": 22,
+					"label": "sync.Mutex: locked fail so try again later"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/sema.go",
+			"bookmarks": [
+				{
+					"line": 137,
+					"column": 12,
+					"label": "sync.Mutex: runtime.mutex, active spin->passive spin->futex"
+				}
+			]
+		},
+		{
+			"path": "src/internal/fuzz/mutator.go",
+			"bookmarks": [
+				{
+					"line": 55,
+					"column": 25,
+					"label": "fuzztest: how fuzz engine mutates input"
+				}
+			]
+		},
+		{
+			"path": "src/testing/testing.go",
+			"bookmarks": [
+				{
+					"line": 1732,
+					"column": 62,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/runtime/os_linux.go",
+			"bookmarks": [
+				{
+					"line": 165,
+					"column": 5,
+					"label": "gmp: newosproc create a new thread"
+				},
+				{
+					"line": 465,
+					"column": 7,
+					"label": "signal: set handler for specific signum"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/symtab.go",
+			"bookmarks": [
+				{
+					"line": 31,
+					"column": 1,
+					"label": "pcln: runtime.Callers(skip) returns the PC of caller's CALL instruction"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/stubs.go",
+			"bookmarks": [
+				{
+					"line": 342,
+					"column": 5,
+					"label": "pcln: getcallerpc returns the caller's CALL instruction, like `CALL runtime.newproc`"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/trace/mmu.go",
+			"bookmarks": [
+				{
+					"line": 85,
+					"column": 0,
+					"label": "mmu: parse traceEvents to prepare for following MMU plot"
+				},
+				{
+					"line": 97,
+					"column": 8,
+					"label": "mmu: `go tool trace` MMU view template"
+				},
+				{
+					"line": 102,
+					"column": 5,
+					"label": "mmu: `go tool trace` MMU view data"
+				},
+				{
+					"line": 117,
+					"column": 30,
+					"label": "mmu: if window size small enough, mmu will be 0, here quikly find the window size"
+				},
+				{
+					"line": 125,
+					"column": 32,
+					"label": "mmu: detemine the maximum of window size"
+				},
+				{
+					"line": 140,
+					"column": 21,
+					"label": "mmu: select 100 samples among [min,max) time window size, and calculate MMU for them"
+				}
+			]
+		},
+		{
+			"path": "src/internal/trace/gc.go",
+			"bookmarks": [
+				{
+					"line": 159,
+					"column": 16,
+					"label": "mmu: per-goroutine view is more precise than system view, for it consider GC happens or not on each Ps"
+				},
+				{
+					"line": 179,
+					"column": 10,
+					"label": "mmu: MMU system view only cares if GC happens on any P, if happens, then MMU at this time is 0"
+				},
+				{
+					"line": 512,
+					"column": 16,
+					"label": "mmu: MMU(window) means the minimum one utilization of all windows of this same window size"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/signal_unix.go",
+			"bookmarks": [
+				{
+					"line": 113,
+					"column": 27,
+					"label": "signal: init signal handlers"
+				}
+			]
+		},
+		{
+			"path": "src/runtime/traceback.go",
+			"bookmarks": [
+				{
+					"line": 992,
+					"column": 5,
+					"label": "signal: print goroutine gp,m,mp and status info when printstack"
+				}
+			]
+		}
+	]
+}
