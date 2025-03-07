@@ -504,6 +504,56 @@
 					"label": "signal: print goroutine gp,m,mp and status info when printstack"
 				}
 			]
+		},
+		{
+			"path": "src/cmd/compile/main.go",
+			"bookmarks": [
+				{
+					"line": 44,
+					"column": 12,
+					"label": "go tool compile"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/link/main.go",
+			"bookmarks": [
+				{
+					"line": 39,
+					"column": 13,
+					"label": "go tool link"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/pack/pack.go",
+			"bookmarks": [
+				{
+					"line": 29,
+					"column": 12,
+					"label": "go tool pack"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/objdump/main.go",
+			"bookmarks": [
+				{
+					"line": 56,
+					"column": 0,
+					"label": "go tool objdump"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/asm/main.go",
+			"bookmarks": [
+				{
+					"line": 24,
+					"column": 8,
+					"label": "go tool asm"
+				}
+			]
 		}
 	]
 }
