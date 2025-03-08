@@ -1,0 +1,44 @@
+{
+	"files": [
+		{
+			"path": "src/cmd/compile/README.md",
+			"bookmarks": [
+				{
+					"line": 6,
+					"column": 33,
+					"label": "toolchain/compile"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/link/internal/ld/main.go",
+			"bookmarks": [
+				{
+					"line": 158,
+					"column": 40,
+					"label": "toolchain/link"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/asm/doc.go",
+			"bookmarks": [
+				{
+					"line": 15,
+					"column": 9,
+					"label": "toolchain/asm"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/go/main.go",
+			"bookmarks": [
+				{
+					"line": 53,
+					"column": 7,
+					"label": "toolchain/build"
+				}
+			]
+		}
+	]
+}
