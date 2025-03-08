@@ -1,0 +1,15 @@
+{
+    "go.alternateTools": {
+        //go1.24
+        "go": "/home/zhangjie/github/golang/go/bin/go",
+    },
+    // apply GO & PATH settings to the terminal
+    "go.terminal.activateEnvironment": true,
+    // envvars passed to the tools
+    "go.toolsEnvVars": {
+        "GOENV": "/home/zhangjie/github/golang/go/go.env",
+    },
+    // `go: install/update the tools`, the tools path
+    "go.toolsGopath": "/home/zhangjie/github/golang/gopath",
+    "go.toolsManagement.go": "/home/zhangjie/githucb/golang/go/bin/go",
+}
