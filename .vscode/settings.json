@@ -11,5 +11,5 @@
     },
     // `go: install/update the tools`, the tools path
     "go.toolsGopath": "/home/zhangjie/github/golang/gopath",
-    "go.toolsManagement.go": "/home/zhangjie/githucb/golang/go/bin/go",
+    "go.toolsManagement.go": "/home/zhangjie/github/golang/go/bin/go",
 }
