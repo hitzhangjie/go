@@ -39,6 +39,56 @@
 					"label": "toolchain/build"
 				}
 			]
+		},
+		{
+			"path": "src/debug/elf/file.go",
+			"bookmarks": [
+				{
+					"line": 207,
+					"column": 19,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/internal/goexperiment/flags.go",
+			"bookmarks": [
+				{
+					"line": 56,
+					"column": 8,
+					"label": "go experimental flags"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/amd64/galign.go",
+			"bookmarks": [
+				{
+					"line": 13,
+					"column": 5,
+					"label": "amd64 arch init"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/base/debug.go",
+			"bookmarks": [
+				{
+					"line": 17,
+					"column": 8,
+					"label": "toolchain/compile -- debug flags"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/base/flag.go",
+			"bookmarks": [
+				{
+					"line": 54,
+					"column": 9,
+					"label": "toolchain/compile -- cmd flags"
+				}
+			]
 		}
 	]
 }
