@@ -41,52 +41,82 @@
 			]
 		},
 		{
-			"path": "src/debug/elf/file.go",
+			"path": "src/cmd/compile/internal/gc/main.go",
 			"bookmarks": [
 				{
 					"line": 207,
-					"column": 19,
-					"label": ""
+					"column": 10,
+					"label": "lexical analysis + syntax analysis + semantic analysis"
 				}
 			]
 		},
 		{
-			"path": "src/internal/goexperiment/flags.go",
+			"path": "src/cmd/compile/internal/noder/noder.go",
 			"bookmarks": [
 				{
-					"line": 56,
-					"column": 8,
-					"label": "go experimental flags"
-				}
-			]
-		},
-		{
-			"path": "src/cmd/compile/internal/amd64/galign.go",
-			"bookmarks": [
-				{
-					"line": 13,
+					"line": 26,
 					"column": 5,
-					"label": "amd64 arch init"
+					"label": "compiler begin to work"
+				},
+				{
+					"line": 58,
+					"column": 23,
+					"label": "parses source file and returns AST (lexcial analysis + syntax analysis)"
 				}
 			]
 		},
 		{
-			"path": "src/cmd/compile/internal/base/debug.go",
+			"path": "src/cmd/compile/internal/syntax/syntax.go",
+			"bookmarks": [
+				{
+					"line": 65,
+					"column": 8,
+					"label": "parse source file (lexical analysis + syntax analysis) and returns AST"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/syntax/parser.go",
 			"bookmarks": [
 				{
 					"line": 17,
-					"column": 8,
-					"label": "toolchain/compile -- debug flags"
+					"column": 19,
+					"label": "lexical analysis"
+				},
+				{
+					"line": 397,
+					"column": 17,
+					"label": "syntax analysis"
 				}
 			]
 		},
 		{
-			"path": "src/cmd/compile/internal/base/flag.go",
+			"path": "src/cmd/compile/internal/types/sym.go",
 			"bookmarks": [
 				{
-					"line": 54,
-					"column": 9,
-					"label": "toolchain/compile -- cmd flags"
+					"line": 23,
+					"column": 0,
+					"label": "types.Sym vs. obj.LSym"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/internal/obj/link.go",
+			"bookmarks": [
+				{
+					"line": 455,
+					"column": 17,
+					"label": "compiler generated symbol into object file"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/syntax/scanner.go",
+			"bookmarks": [
+				{
+					"line": 87,
+					"column": 18,
+					"label": "lexical analysis"
 				}
 			]
 		}
