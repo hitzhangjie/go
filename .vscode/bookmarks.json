@@ -119,6 +119,31 @@
 					"label": "lexical analysis"
 				}
 			]
+		},
+		{
+			"path": "src/go/version/version.go",
+			"bookmarks": [
+				{
+					"line": 56,
+					"column": 8,
+					"label": "semver: tests which version is newer"
+				},
+				{
+					"line": 61,
+					"column": 8,
+					"label": "semver: tests if version string valid"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/buildid/buildid.go",
+			"bookmarks": [
+				{
+					"line": 53,
+					"column": 25,
+					"label": "toolchain/buildid"
+				}
+			]
 		}
 	]
 }
