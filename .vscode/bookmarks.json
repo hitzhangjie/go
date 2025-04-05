@@ -144,6 +144,36 @@
 					"label": "toolchain/buildid"
 				}
 			]
+		},
+		{
+			"path": "src/cmd/compile/internal/base/timings.go",
+			"bookmarks": [
+				{
+					"line": 18,
+					"column": 8,
+					"label": "timings: report different phases execution time within compilation"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/internal/obj/dwarf.go",
+			"bookmarks": [
+				{
+					"line": 333,
+					"column": 18,
+					"label": "linker: generate DWARF DIE for TEXT symbol `LSym`"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/objw/prog.go",
+			"bookmarks": [
+				{
+					"line": 109,
+					"column": 18,
+					"label": "progs: convert from Progs to machine code"
+				}
+			]
 		}
 	]
 }
