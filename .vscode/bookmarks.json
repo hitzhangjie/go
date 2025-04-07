@@ -87,6 +87,16 @@
 					"line": 268,
 					"column": 12,
 					"label": "compiler: do escape analysis"
+				},
+				{
+					"line": 351,
+					"column": 1,
+					"label": "compiler: dump gc needed data"
+				},
+				{
+					"line": 353,
+					"column": 1,
+					"label": "generate the *.o"
 				}
 			]
 		},
@@ -267,6 +277,11 @@
 					"line": 318,
 					"column": 25,
 					"label": "typecheck: typecheck against the parsed sources (the AST)"
+				},
+				{
+					"line": 465,
+					"column": 5,
+					"label": "compiler: how *.o created"
 				}
 			]
 		},
@@ -387,6 +402,16 @@
 					"line": 160,
 					"column": 17,
 					"label": "type: each named type has a relevant types.Type instance"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/gc/obj.go",
+			"bookmarks": [
+				{
+					"line": 43,
+					"column": 8,
+					"label": "compiler: dump a compiler or linker object"
 				}
 			]
 		}
