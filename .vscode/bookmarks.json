@@ -47,6 +47,46 @@
 					"line": 207,
 					"column": 10,
 					"label": "lexical analysis + syntax analysis + semantic analysis"
+				},
+				{
+					"line": 218,
+					"column": 19,
+					"label": "dwarf: dwarf relevant info"
+				},
+				{
+					"line": 221,
+					"column": 0,
+					"label": "ssa: ???"
+				},
+				{
+					"line": 228,
+					"column": 6,
+					"label": "pgo: read pgo profile to guide optimization"
+				},
+				{
+					"line": 239,
+					"column": 1,
+					"label": "compiler: devirtualize and inline optimization"
+				},
+				{
+					"line": 246,
+					"column": 27,
+					"label": "loopvar: capture loopvar"
+				},
+				{
+					"line": 251,
+					"column": 11,
+					"label": "compiler: generate initialization record for the package, see runtime/proc.go:initTask"
+				},
+				{
+					"line": 257,
+					"column": 12,
+					"label": "compiler: remove unused assignments to local variables"
+				},
+				{
+					"line": 268,
+					"column": 12,
+					"label": "compiler: do escape analysis"
 				}
 			]
 		},
@@ -62,6 +102,11 @@
 					"line": 58,
 					"column": 23,
 					"label": "parses source file and returns AST (lexcial analysis + syntax analysis)"
+				},
+				{
+					"line": 76,
+					"column": 1,
+					"label": "typecheck: typecheck against the parsed sources (the AST) <<<<< entrypoint"
 				}
 			]
 		},
@@ -127,6 +172,11 @@
 					"line": 455,
 					"column": 17,
 					"label": "compiler generated symbol into object file"
+				},
+				{
+					"line": 1157,
+					"column": 1,
+					"label": "link: data wait for linker written out to *.o files"
 				}
 			]
 		},
@@ -179,6 +229,11 @@
 			"path": "src/cmd/internal/obj/dwarf.go",
 			"bookmarks": [
 				{
+					"line": 4,
+					"column": 10,
+					"label": "dwarf: dwarf relevant actions"
+				},
+				{
 					"line": 333,
 					"column": 18,
 					"label": "linker: generate DWARF DIE for TEXT symbol `LSym`"
@@ -192,6 +247,146 @@
 					"line": 109,
 					"column": 18,
 					"label": "progs: convert from Progs to machine code"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/noder/unified.go",
+			"bookmarks": [
+				{
+					"line": 194,
+					"column": 9,
+					"label": ""
+				},
+				{
+					"line": 202,
+					"column": 3,
+					"label": "typecheck: pkg relevant init"
+				},
+				{
+					"line": 318,
+					"column": 25,
+					"label": "typecheck: typecheck against the parsed sources (the AST)"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/noder/irgen.go",
+			"bookmarks": [
+				{
+					"line": 25,
+					"column": 11,
+					"label": ""
+				},
+				{
+					"line": 94,
+					"column": 21,
+					"label": "typecheck: typecheck against the parsed sources (the AST)"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/types2/api.go",
+			"bookmarks": [
+				{
+					"line": 309,
+					"column": 0,
+					"label": "scopes: scopes relevant info within a package"
+				},
+				{
+					"line": 316,
+					"column": 1,
+					"label": "init: package level initializers"
+				},
+				{
+					"line": 323,
+					"column": 9,
+					"label": "fileversion: each go module go.mod can have different go version"
+				},
+				{
+					"line": 485,
+					"column": 20,
+					"label": "typecheck: typecheck against the parsed sources (the AST)"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/types2/scope.go",
+			"bookmarks": [
+				{
+					"line": 21,
+					"column": 5,
+					"label": "scope: scope relevant info"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/types2/check.go",
+			"bookmarks": [
+				{
+					"line": 345,
+					"column": 37,
+					"label": "goversion: determine goversion for each file"
+				},
+				{
+					"line": 421,
+					"column": 26,
+					"label": "typecheck: typecheck against the parsed sources (the AST)"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/types2/resolver.go",
+			"bookmarks": [
+				{
+					"line": 201,
+					"column": 40,
+					"label": "typecheck: collect defined package objects (import,var,const,func...)"
+				},
+				{
+					"line": 231,
+					"column": 2,
+					"label": "scopes: each fileNo has its scope"
+				},
+				{
+					"line": 232,
+					"column": 8,
+					"label": "scopes: each file has a filescope"
+				},
+				{
+					"line": 473,
+					"column": 17,
+					"label": "typecheck: check if duplicate definition of vars, funcs, ... existed in files of same pkg"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/dwarfgen/dwarf.go",
+			"bookmarks": [
+				{
+					"line": 614,
+					"column": 4,
+					"label": "dwarf: compiler generate some info to indicate linker to save it in DWARF DIE"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/internal/objabi/symkind.go",
+			"bookmarks": [
+				{
+					"line": 63,
+					"column": 1,
+					"label": "symkind: note these debugging relevant symbol kinds, linker use it to save the DWARF info in ELF sections"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/types/type.go",
+			"bookmarks": [
+				{
+					"line": 160,
+					"column": 17,
+					"label": "type: each named type has a relevant types.Type instance"
 				}
 			]
 		}
