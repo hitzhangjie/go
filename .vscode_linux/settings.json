@@ -9,7 +9,7 @@
     "go.terminal.activateEnvironment": true,
     // envvars passed to the tools
     "go.toolsEnvVars": {
-        "GOENV": "/home/zhangjie/github/golang/go/go.env",
+        "GOENV": "/home/zhangjie/github/golang/go/go.env.linux",
     },
     // `go: install/update the tools`, the tools path
     "go.toolsGopath": "/home/zhangjie/github/golang/gopath",

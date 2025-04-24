@@ -1,14 +1,19 @@
 {
-  "go.toolsEnvVars": {
-    "GOOS": "linux",
-    "GOARCH": "amd64",
-    "GOPROXY": "https://goproxy.cn,direct",
-    "GOROOT": "/Users/zhangjie/Github/go"
-  },
-  "files.exclude": {
-    "{.idea,.vscode,misc,test,bin,pkg}": true
-  },
-  "files.watcherExclude": {
-    "{bin,pkg,test}": true
-  }
+    "go.alternateTools": {
+        //go1.19
+        "go": "/Users/zhangjie/Github/golang/go/bin/go",
+        //built by go1.19
+        "gopls": "/Users/zhangjie/Github/golang/gopath/bin/gopls",
+    },
+    // apply GO & PATH settings to the terminal
+    "go.terminal.activateEnvironment": true,
+    // envvars passed to the tools
+    "go.toolsEnvVars": {
+        "GOENV": "/Users/zhangjie/Github/golang/go/go.env",
+        "GOROOT": "/Users/zhangjie/Github/golang/go",
+        "GOCACHE": "/Users/zhangjie/Github/golang/.cache/go-build"
+    },
+    // `go: install/update the tools`, the tools path
+    "go.toolsGopath": "/Users/zhangjie/Github/golang/gopath",
+    "go.toolsManagement.go": "/Users/zhangjie/Github/golang/go/bin/go",
 }
