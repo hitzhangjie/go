@@ -2,6 +2,9 @@
 
 hide footbox
 
+participant "xxx"
+note right of xxx: src/cmd/internal/dwarf， \ndwarf调试信息生成，分散在compile、link，\n这部分代码是二者共享的。
+
 ' Define participants
 participant "*.go" as P0
 participant "compiler" as P1

@@ -89,8 +89,78 @@
 					"label": ""
 				},
 				{
+					"line": 199,
+					"column": 8,
+					"label": ""
+				},
+				{
+					"line": 210,
+					"column": 16,
+					"label": ""
+				},
+				{
 					"line": 305,
 					"column": 3,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/internal/dwarf/dwarf.go",
+			"bookmarks": [
+				{
+					"line": 4,
+					"column": 35,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/noder/noder.go",
+			"bookmarks": [
+				{
+					"line": 58,
+					"column": 25,
+					"label": ""
+				},
+				{
+					"line": 76,
+					"column": 5,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/noder/unified.go",
+			"bookmarks": [
+				{
+					"line": 206,
+					"column": 9,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/link/internal/ld/main.go",
+			"bookmarks": [
+				{
+					"line": 314,
+					"column": 3,
+					"label": "linker's tasks to do"
+				},
+				{
+					"line": 426,
+					"column": 19,
+					"label": ""
+				},
+				{
+					"line": 430,
+					"column": 7,
+					"label": ""
+				},
+				{
+					"line": 434,
+					"column": 19,
 					"label": ""
 				}
 			]
