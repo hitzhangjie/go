@@ -1,0 +1,50 @@
+@startuml
+
+hide footbox
+
+' Define participants
+participant "*.go" as P0
+participant "compiler" as P1
+participant "plist" as P2
+participant "assembler" as P3
+participant "objectfile" as P4
+participant "linker" as P5
+participant "executable" as P6
+
+' Compilation Phase
+activate P1
+P0 -> P1: 1. Write Go source code
+P1 -> P1: 2. Lexical analysis (get tokens)
+P1 -> P1: 3. Syntax analysis (get AST)
+P1 -> P1: 4. Semantic analysis (type checking)
+P1 -> P1: 5. Build SSA, SSA.compileFunctions
+P1 -> P1: 6. SSA-based optimization
+P1 -> P2: 7. Write pseudo instruction list
+activate P2
+P2 -> P1: 8. Generate *.s assembly file
+deactivate P2
+note left of P1: Generate DWARF info during phases 3-5
+P1 -> P3: 9. Pass *.s to assembler
+activate P3
+deactivate P1
+
+' Assembly Phase
+P3 -> P3: 10. Assemble to machine code
+activate P4
+P3 -> P4: 11. Write *.o object file
+P3 -> P4: 12. DumpData (gcdata, plugintable, gc embeds)
+P3 -> P4: 13. DumpObj (compiler/linker object file)
+deactivate P3
+
+' Linking Phase
+P4 -> P5: 14. Pass object files to linker
+activate P5
+deactivate P4
+P5 -> P5: 15. Static linking, symbol analysis, relocation
+P5 -> P5: 16. Merge DWARF info
+P5 -> P5: 17. Generate additional DWARF info
+activate P6
+P5 -> P6: 18. Create final executable
+deactivate P5
+
+@enduml

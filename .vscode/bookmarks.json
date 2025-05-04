@@ -1,0 +1,99 @@
+{
+	"files": [
+		{
+			"path": "src/cmd/internal/obj/plist.go",
+			"bookmarks": [
+				{
+					"line": 23,
+					"column": 5,
+					"label": ""
+				},
+				{
+					"line": 172,
+					"column": 7,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/objw/prog.go",
+			"bookmarks": [
+				{
+					"line": 109,
+					"column": 25,
+					"label": ""
+				},
+				{
+					"line": 111,
+					"column": 12,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/asm/main.go",
+			"bookmarks": [
+				{
+					"line": 105,
+					"column": 13,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssagen/abi.go",
+			"bookmarks": [
+				{
+					"line": 339,
+					"column": 46,
+					"label": ""
+				},
+				{
+					"line": 357,
+					"column": 10,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssagen/pgen.go",
+			"bookmarks": [
+				{
+					"line": 300,
+					"column": 35,
+					"label": ""
+				},
+				{
+					"line": 326,
+					"column": 35,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/gc/compile.go",
+			"bookmarks": [
+				{
+					"line": 120,
+					"column": 21,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/gc/main.go",
+			"bookmarks": [
+				{
+					"line": 59,
+					"column": 0,
+					"label": ""
+				},
+				{
+					"line": 305,
+					"column": 3,
+					"label": ""
+				}
+			]
+		}
+	]
+}
