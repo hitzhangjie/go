@@ -141,12 +141,42 @@
 			]
 		},
 		{
+			"path": "src/cmd/link/internal/ld/dwarf.go",
+			"bookmarks": [
+				{
+					"line": 1409,
+					"column": 27,
+					"label": ""
+				},
+				{
+					"line": 1727,
+					"column": 5,
+					"label": ""
+				},
+				{
+					"line": 1797,
+					"column": 30,
+					"label": ""
+				},
+				{
+					"line": 1910,
+					"column": 16,
+					"label": "why?"
+				}
+			]
+		},
+		{
 			"path": "src/cmd/link/internal/ld/main.go",
 			"bookmarks": [
 				{
 					"line": 314,
 					"column": 3,
 					"label": "linker's tasks to do"
+				},
+				{
+					"line": 376,
+					"column": 15,
+					"label": ""
 				},
 				{
 					"line": 426,
@@ -161,6 +191,26 @@
 				{
 					"line": 434,
 					"column": 19,
+					"label": ""
+				}
+			]
+		},
+		{
+			"path": "src/cmd/link/internal/loader/loader.go",
+			"bookmarks": [
+				{
+					"line": 614,
+					"column": 25,
+					"label": "linker: 符号解析逻辑"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/link/internal/sym/library.go",
+			"bookmarks": [
+				{
+					"line": 8,
+					"column": 5,
 					"label": ""
 				}
 			]
