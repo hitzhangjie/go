@@ -89,6 +89,11 @@
 					"label": "compiler: do escape analysis"
 				},
 				{
+					"line": 288,
+					"column": 6,
+					"label": "compiler: compile the functions (build SSA -> plist -> machine code)"
+				},
+				{
 					"line": 351,
 					"column": 1,
 					"label": "compiler: dump gc needed data"
@@ -412,6 +417,31 @@
 					"line": 43,
 					"column": 8,
 					"label": "compiler: dump a compiler or linker object"
+				}
+			]
+		},
+		{
+			"path": "src/cmd/compile/internal/ssagen/pgen.go",
+			"bookmarks": [
+				{
+					"line": 302,
+					"column": 8,
+					"label": "compiler: generate SSA, plist, machine code"
+				},
+				{
+					"line": 303,
+					"column": 10,
+					"label": "compiler: generate code in SSA form"
+				},
+				{
+					"line": 313,
+					"column": 3,
+					"label": "compiler: convert SSA form code to plist (pseudo instruction list)"
+				},
+				{
+					"line": 328,
+					"column": 6,
+					"label": "compiler: convert plist to machine code"
 				}
 			]
 		}
