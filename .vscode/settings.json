@@ -12,4 +12,14 @@
     // `go: install/update the tools`, the tools path
     "go.toolsGopath": "/home/zhangjie/github/golang/gopath",
     "go.toolsManagement.go": "/home/zhangjie/github/golang/go/bin/go",
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "bin": true,
+        "pkg": true,
+    }
 }
