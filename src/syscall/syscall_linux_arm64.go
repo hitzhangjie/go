@@ -10,6 +10,7 @@ const (
 	_SYS_setgroups  = SYS_SETGROUPS
 	_SYS_clone3     = 435
 	_SYS_faccessat2 = 439
+	_SYS_fchmodat2  = 452
 )
 
 //sys	EpollWait(epfd int, events []EpollEvent, msec int) (n int, err error) = SYS_EPOLL_PWAIT
@@ -26,7 +27,6 @@ func Fstatat(fd int, path string, stat *Stat_t, flags int) error {
 //sysnb	Getegid() (egid int)
 //sysnb	Geteuid() (euid int)
 //sysnb	Getgid() (gid int)
-//sysnb	getrlimit(resource int, rlim *Rlimit) (err error)
 //sysnb	Getuid() (uid int)
 //sys	Listen(s int, n int) (err error)
 //sys	pread(fd int, p []byte, offset int64) (n int, err error) = SYS_PREAD64
@@ -36,7 +36,6 @@ func Fstatat(fd int, path string, stat *Stat_t, flags int) error {
 //sys	sendfile(outfd int, infd int, offset *int64, count int) (written int, err error)
 //sys	Setfsgid(gid int) (err error)
 //sys	Setfsuid(uid int) (err error)
-//sysnb	setrlimit(resource int, rlim *Rlimit) (err error)
 //sys	Shutdown(fd int, how int) (err error)
 //sys	Splice(rfd int, roff *int64, wfd int, woff *int64, len int, flags int) (n int64, err error)
 
@@ -137,24 +136,6 @@ func utimes(path string, tv *[2]Timeval) (err error) {
 		NsecToTimespec(TimevalToNsec(tv[1])),
 	}
 	return utimensat(_AT_FDCWD, path, (*[2]Timespec)(unsafe.Pointer(&ts[0])), 0)
-}
-
-// Getrlimit prefers the prlimit64 system call. See issue 38604.
-func Getrlimit(resource int, rlim *Rlimit) error {
-	err := prlimit(0, resource, nil, rlim)
-	if err != ENOSYS {
-		return err
-	}
-	return getrlimit(resource, rlim)
-}
-
-// Setrlimit prefers the prlimit64 system call. See issue 38604.
-func Setrlimit(resource int, rlim *Rlimit) error {
-	err := prlimit(0, resource, rlim, nil)
-	if err != ENOSYS {
-		return err
-	}
-	return setrlimit(resource, rlim)
 }
 
 func (r *PtraceRegs) PC() uint64 { return r.Pc }

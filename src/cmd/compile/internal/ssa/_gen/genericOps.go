@@ -16,6 +16,9 @@ package main
 // are signed or unsigned.
 
 var genericOps = []opData{
+	// Pseudo-op.
+	{name: "Last", argLength: -1}, // return last element of tuple; for "let" bindings
+
 	// 2-input arithmetic
 	// Types must be consistent with Go typing. Add, for example, must take two values
 	// of the same type and produces that same type.
@@ -229,6 +232,7 @@ var genericOps = []opData{
 	{name: "Ctz16", argLength: 1},        // Count trailing (low order) zeroes (returns 0-16)
 	{name: "Ctz32", argLength: 1},        // Count trailing (low order) zeroes (returns 0-32)
 	{name: "Ctz64", argLength: 1},        // Count trailing (low order) zeroes (returns 0-64)
+	{name: "Ctz64On32", argLength: 2},    // Count trailing (low order) zeroes (returns 0-64) in arg[1]<<32+arg[0]
 	{name: "Ctz8NonZero", argLength: 1},  // same as above, but arg[0] known to be non-zero, returns 0-7
 	{name: "Ctz16NonZero", argLength: 1}, // same as above, but arg[0] known to be non-zero, returns 0-15
 	{name: "Ctz32NonZero", argLength: 1}, // same as above, but arg[0] known to be non-zero, returns 0-31
@@ -238,6 +242,7 @@ var genericOps = []opData{
 	{name: "BitLen32", argLength: 1},     // Number of bits in arg[0] (returns 0-32)
 	{name: "BitLen64", argLength: 1},     // Number of bits in arg[0] (returns 0-64)
 
+	{name: "Bswap16", argLength: 1}, // Swap bytes
 	{name: "Bswap32", argLength: 1}, // Swap bytes
 	{name: "Bswap64", argLength: 1}, // Swap bytes
 
@@ -283,6 +288,18 @@ var genericOps = []opData{
 	// Modify the sign bit
 	{name: "Abs", argLength: 1},      // absolute value arg0
 	{name: "Copysign", argLength: 2}, // copy sign from arg0 to arg1
+
+	// Integer min/max implementation, if hardware is available.
+	{name: "Min64", argLength: 2},  // min(arg0,arg1), signed
+	{name: "Max64", argLength: 2},  // max(arg0,arg1), signed
+	{name: "Min64u", argLength: 2}, // min(arg0,arg1), unsigned
+	{name: "Max64u", argLength: 2}, // max(arg0,arg1), unsigned
+
+	// Float min/max implementation, if hardware is available.
+	{name: "Min64F", argLength: 2}, // min(arg0,arg1)
+	{name: "Min32F", argLength: 2}, // min(arg0,arg1)
+	{name: "Max64F", argLength: 2}, // max(arg0,arg1)
+	{name: "Max32F", argLength: 2}, // max(arg0,arg1)
 
 	// 3-input opcode.
 	// Fused-multiply-add, float64 only.
@@ -345,18 +362,31 @@ var genericOps = []opData{
 	// If the variable is a global, the base pointer will be SB and
 	// the Aux field will be a *obj.LSym.
 	// If the variable is a local, the base pointer will be SP and
-	// the Aux field will be a *gc.Node.
+	// the Aux field will be a *ir.Name
 	{name: "Addr", argLength: 1, aux: "Sym", symEffect: "Addr"},      // Address of a variable.  Arg0=SB.  Aux identifies the variable.
 	{name: "LocalAddr", argLength: 2, aux: "Sym", symEffect: "Addr"}, // Address of a variable.  Arg0=SP. Arg1=mem. Aux identifies the variable.
 
-	{name: "SP", zeroWidth: true},                 // stack pointer
-	{name: "SB", typ: "Uintptr", zeroWidth: true}, // static base pointer (a.k.a. globals pointer)
-	{name: "Invalid"},                             // unused value
+	{name: "SP", zeroWidth: true, fixedReg: true},                 // stack pointer
+	{name: "SB", typ: "Uintptr", zeroWidth: true, fixedReg: true}, // static base pointer (a.k.a. globals pointer)
+	{name: "Invalid"}, // unused value
+	{name: "SPanchored", typ: "Uintptr", argLength: 2, zeroWidth: true}, // arg0 = SP, arg1 = mem. Result is identical to arg0, but cannot be scheduled before memory state arg1.
 
 	// Memory operations
 	{name: "Load", argLength: 2},                          // Load from arg0.  arg1=memory
 	{name: "Dereference", argLength: 2},                   // Load from arg0.  arg1=memory.  Helper op for arg/result passing, result is an otherwise not-SSA-able "value".
 	{name: "Store", argLength: 3, typ: "Mem", aux: "Typ"}, // Store arg1 to arg0.  arg2=memory, aux=type.  Returns memory.
+
+	// masked memory operations.
+	// TODO add 16 and 8
+	{name: "LoadMasked8", argLength: 3},                           // Load from arg0, arg1 = mask of 8-bits, arg2 = memory
+	{name: "LoadMasked16", argLength: 3},                          // Load from arg0, arg1 = mask of 16-bits, arg2 = memory
+	{name: "LoadMasked32", argLength: 3},                          // Load from arg0, arg1 = mask of 32-bits, arg2 = memory
+	{name: "LoadMasked64", argLength: 3},                          // Load from arg0, arg1 = mask of 64-bits, arg2 = memory
+	{name: "StoreMasked8", argLength: 4, typ: "Mem", aux: "Typ"},  // Store arg2 to arg0, arg1=mask of 8-bits, arg3 = memory
+	{name: "StoreMasked16", argLength: 4, typ: "Mem", aux: "Typ"}, // Store arg2 to arg0, arg1=mask of 16-bits, arg3 = memory
+	{name: "StoreMasked32", argLength: 4, typ: "Mem", aux: "Typ"}, // Store arg2 to arg0, arg1=mask of 32-bits, arg3 = memory
+	{name: "StoreMasked64", argLength: 4, typ: "Mem", aux: "Typ"}, // Store arg2 to arg0, arg1=mask of 64-bits, arg3 = memory
+
 	// Normally we require that the source and destination of Move do not overlap.
 	// There is an exception when we know all the loads will happen before all
 	// the stores. In that case, overlap is ok. See
@@ -377,12 +407,13 @@ var genericOps = []opData{
 	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "Typ"},    // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
 	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
 	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
+	{name: "WBend", argLength: 1, typ: "Mem"},                  // Write barrier code is done, interrupting is now allowed.
 
-	// WB invokes runtime.gcWriteBarrier. This is not a normal
+	// WB invokes runtime.gcWriteBarrier.  This is not a normal
 	// call: it takes arguments in registers, doesn't clobber
 	// general-purpose registers (the exact clobber set is
 	// arch-dependent), and is not a safe-point.
-	{name: "WB", argLength: 3, typ: "Mem", aux: "Sym", symEffect: "None"}, // arg0=destptr, arg1=srcptr, arg2=mem, aux=runtime.gcWriteBarrier
+	{name: "WB", argLength: 1, typ: "(BytePtr,Mem)", aux: "Int64"}, // arg0=mem, auxint=# of buffer entries needed. Returns buffer pointer and memory.
 
 	{name: "HasCPUFeature", argLength: 0, typ: "bool", aux: "Sym", symEffect: "None"}, // aux=place that this feature flag can be loaded from
 
@@ -468,13 +499,13 @@ var genericOps = []opData{
 	{name: "IsNonNil", argLength: 1, typ: "Bool"},        // arg0 != nil
 	{name: "IsInBounds", argLength: 2, typ: "Bool"},      // 0 <= arg0 < arg1. arg1 is guaranteed >= 0.
 	{name: "IsSliceInBounds", argLength: 2, typ: "Bool"}, // 0 <= arg0 <= arg1. arg1 is guaranteed >= 0.
-	{name: "NilCheck", argLength: 2, typ: "Void"},        // arg0=ptr, arg1=mem. Panics if arg0 is nil. Returns void.
+	{name: "NilCheck", argLength: 2, nilCheck: true},     // arg0=ptr, arg1=mem. Panics if arg0 is nil. Returns the ptr unmodified.
 
 	// Pseudo-ops
 	{name: "GetG", argLength: 1, zeroWidth: true}, // runtime.getg() (read g pointer). arg0=mem
 	{name: "GetClosurePtr"},                       // get closure pointer from dedicated register
-	{name: "GetCallerPC"},                         // for getcallerpc intrinsic
-	{name: "GetCallerSP"},                         // for getcallersp intrinsic
+	{name: "GetCallerPC"},                         // for GetCallerPC intrinsic
+	{name: "GetCallerSP", argLength: 1},           // for GetCallerSP intrinsic. arg0=mem.
 
 	// Indexing operations
 	{name: "PtrIndex", argLength: 2},             // arg0=ptr, arg1=index. Computes ptr+sizeof(*v.type)*index, where index is extended to ptrwidth type
@@ -506,11 +537,7 @@ var genericOps = []opData{
 	{name: "IData", argLength: 1},                // arg0=interface, returns data field
 
 	// Structs
-	{name: "StructMake0"},                              // Returns struct with 0 fields.
-	{name: "StructMake1", argLength: 1},                // arg0=field0.  Returns struct.
-	{name: "StructMake2", argLength: 2},                // arg0,arg1=field0,field1.  Returns struct.
-	{name: "StructMake3", argLength: 3},                // arg0..2=field0..2.  Returns struct.
-	{name: "StructMake4", argLength: 4},                // arg0..3=field0..3.  Returns struct.
+	{name: "StructMake", argLength: -1},                // args...=field0..n-1. Returns struct with n fields.
 	{name: "StructSelect", argLength: 1, aux: "Int64"}, // arg0=struct, auxint=field index.  Returns the auxint'th field.
 
 	// Arrays
@@ -531,9 +558,9 @@ var genericOps = []opData{
 	// Unknown value. Used for Values whose values don't matter because they are dead code.
 	{name: "Unknown"},
 
-	{name: "VarDef", argLength: 1, aux: "Sym", typ: "Mem", symEffect: "None", zeroWidth: true}, // aux is a *gc.Node of a variable that is about to be initialized.  arg0=mem, returns mem
+	{name: "VarDef", argLength: 1, aux: "Sym", typ: "Mem", symEffect: "None", zeroWidth: true}, // aux is a *ir.Name of a variable that is about to be initialized.  arg0=mem, returns mem
 	// TODO: what's the difference between VarLive and KeepAlive?
-	{name: "VarLive", argLength: 1, aux: "Sym", symEffect: "Read", zeroWidth: true}, // aux is a *gc.Node of a variable that must be kept live.  arg0=mem, returns mem
+	{name: "VarLive", argLength: 1, aux: "Sym", symEffect: "Read", zeroWidth: true}, // aux is a *ir.Name of a variable that must be kept live.  arg0=mem, returns mem
 	{name: "KeepAlive", argLength: 2, typ: "Mem", zeroWidth: true},                  // arg[0] is a value that must be kept alive until this mark.  arg[1]=mem, returns mem
 
 	// InlMark marks the start of an inlined function body. Its AuxInt field
@@ -545,8 +572,9 @@ var genericOps = []opData{
 	{name: "Int64Hi", argLength: 1, typ: "UInt32"},   // high 32-bit of arg0
 	{name: "Int64Lo", argLength: 1, typ: "UInt32"},   // low 32-bit of arg0
 
-	{name: "Add32carry", argLength: 2, commutative: true, typ: "(UInt32,Flags)"}, // arg0 + arg1, returns (value, carry)
-	{name: "Add32withcarry", argLength: 3, commutative: true},                    // arg0 + arg1 + arg2, arg2=carry (0 or 1)
+	{name: "Add32carry", argLength: 2, commutative: true, typ: "(UInt32,Flags)"},          // arg0 + arg1, returns (value, carry)
+	{name: "Add32withcarry", argLength: 3, commutative: true},                             // arg0 + arg1 + arg2, arg2=carry (0 or 1)
+	{name: "Add32carrywithcarry", argLength: 3, commutative: true, typ: "(UInt32,Flags)"}, // arg0 + arg1 + arg2, arg2=carry, returns (value, carry)
 
 	{name: "Sub32carry", argLength: 2, typ: "(UInt32,Flags)"}, // arg0 - arg1, returns (value, carry)
 	{name: "Sub32withcarry", argLength: 3},                    // arg0 - arg1 - arg2, arg2=carry (0 or 1)
@@ -573,12 +601,13 @@ var genericOps = []opData{
 	// pseudo-ops for breaking Tuple
 	{name: "Select0", argLength: 1, zeroWidth: true},  // the first component of a tuple
 	{name: "Select1", argLength: 1, zeroWidth: true},  // the second component of a tuple
+	{name: "MakeTuple", argLength: 2},                 // arg0 arg1 are components of a "Tuple" (like the result from a 128bits op).
 	{name: "SelectN", argLength: 1, aux: "Int64"},     // arg0=result, auxint=field index.  Returns the auxint'th member.
 	{name: "SelectNAddr", argLength: 1, aux: "Int64"}, // arg0=result, auxint=field index.  Returns the address of auxint'th member. Used for un-SSA-able result types.
 	{name: "MakeResult", argLength: -1},               // arg0 .. are components of a "Result" (like the result from a Call). The last arg should be memory (like the result from a call).
 
 	// Atomic operations used for semantically inlining sync/atomic and
-	// runtime/internal/atomic. Atomic loads return a new memory so that
+	// internal/runtime/atomic. Atomic loads return a new memory so that
 	// the loads are properly ordered with respect to other loads and
 	// stores.
 	{name: "AtomicLoad8", argLength: 2, typ: "(UInt8,Mem)"},                                    // Load from arg0.  arg1=memory.  Returns loaded value and new memory.
@@ -593,6 +622,7 @@ var genericOps = []opData{
 	{name: "AtomicStorePtrNoWB", argLength: 3, typ: "Mem", hasSideEffects: true},               // Store arg1 to *arg0.  arg2=memory.  Returns memory.
 	{name: "AtomicStoreRel32", argLength: 3, typ: "Mem", hasSideEffects: true},                 // Store arg1 to *arg0.  arg2=memory.  Lock release, returns memory.
 	{name: "AtomicStoreRel64", argLength: 3, typ: "Mem", hasSideEffects: true},                 // Store arg1 to *arg0.  arg2=memory.  Lock release, returns memory.
+	{name: "AtomicExchange8", argLength: 3, typ: "(UInt8,Mem)", hasSideEffects: true},          // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicExchange32", argLength: 3, typ: "(UInt32,Mem)", hasSideEffects: true},        // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicExchange64", argLength: 3, typ: "(UInt64,Mem)", hasSideEffects: true},        // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicAdd32", argLength: 3, typ: "(UInt32,Mem)", hasSideEffects: true},             // Do *arg0 += arg1.  arg2=memory.  Returns sum and new memory.
@@ -600,25 +630,43 @@ var genericOps = []opData{
 	{name: "AtomicCompareAndSwap32", argLength: 4, typ: "(Bool,Mem)", hasSideEffects: true},    // if *arg0==arg1, then set *arg0=arg2.  Returns true if store happens and new memory.
 	{name: "AtomicCompareAndSwap64", argLength: 4, typ: "(Bool,Mem)", hasSideEffects: true},    // if *arg0==arg1, then set *arg0=arg2.  Returns true if store happens and new memory.
 	{name: "AtomicCompareAndSwapRel32", argLength: 4, typ: "(Bool,Mem)", hasSideEffects: true}, // if *arg0==arg1, then set *arg0=arg2.  Lock release, reports whether store happens and new memory.
-	{name: "AtomicAnd8", argLength: 3, typ: "Mem", hasSideEffects: true},                       // *arg0 &= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicAnd32", argLength: 3, typ: "Mem", hasSideEffects: true},                      // *arg0 &= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicOr8", argLength: 3, typ: "Mem", hasSideEffects: true},                        // *arg0 |= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicOr32", argLength: 3, typ: "Mem", hasSideEffects: true},                       // *arg0 |= arg1.  arg2=memory.  Returns memory.
+
+	// Older atomic logical operations which don't return the old value.
+	{name: "AtomicAnd8", argLength: 3, typ: "Mem", hasSideEffects: true},  // *arg0 &= arg1.  arg2=memory.  Returns memory.
+	{name: "AtomicOr8", argLength: 3, typ: "Mem", hasSideEffects: true},   // *arg0 |= arg1.  arg2=memory.  Returns memory.
+	{name: "AtomicAnd32", argLength: 3, typ: "Mem", hasSideEffects: true}, // *arg0 &= arg1.  arg2=memory.  Returns memory.
+	{name: "AtomicOr32", argLength: 3, typ: "Mem", hasSideEffects: true},  // *arg0 |= arg1.  arg2=memory.  Returns memory.
+
+	// Newer atomic logical operations which return the old value.
+	{name: "AtomicAnd64value", argLength: 3, typ: "(Uint64, Mem)", hasSideEffects: true}, // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicAnd32value", argLength: 3, typ: "(Uint32, Mem)", hasSideEffects: true}, // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicAnd8value", argLength: 3, typ: "(Uint8, Mem)", hasSideEffects: true},   // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr64value", argLength: 3, typ: "(Uint64, Mem)", hasSideEffects: true},  // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr32value", argLength: 3, typ: "(Uint32, Mem)", hasSideEffects: true},  // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr8value", argLength: 3, typ: "(Uint8, Mem)", hasSideEffects: true},    // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
 
 	// Atomic operation variants
 	// These variants have the same semantics as above atomic operations.
 	// But they are used for generating more efficient code on certain modern machines, with run-time CPU feature detection.
-	// Currently, they are used on ARM64 only.
+	// On ARM64, these are used when the LSE hardware feature is available (either known at compile time or detected at runtime). If LSE is not available,
+	// then the basic atomic operations are used instead.
+	{name: "AtomicStore8Variant", argLength: 3, typ: "Mem", hasSideEffects: true},  // Store arg1 to *arg0.  arg2=memory.  Returns memory.
+	{name: "AtomicStore32Variant", argLength: 3, typ: "Mem", hasSideEffects: true}, // Store arg1 to *arg0.  arg2=memory.  Returns memory.
+	{name: "AtomicStore64Variant", argLength: 3, typ: "Mem", hasSideEffects: true}, // Store arg1 to *arg0.  arg2=memory.  Returns memory.
+
 	{name: "AtomicAdd32Variant", argLength: 3, typ: "(UInt32,Mem)", hasSideEffects: true},          // Do *arg0 += arg1.  arg2=memory.  Returns sum and new memory.
 	{name: "AtomicAdd64Variant", argLength: 3, typ: "(UInt64,Mem)", hasSideEffects: true},          // Do *arg0 += arg1.  arg2=memory.  Returns sum and new memory.
+	{name: "AtomicExchange8Variant", argLength: 3, typ: "(UInt8,Mem)", hasSideEffects: true},       // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicExchange32Variant", argLength: 3, typ: "(UInt32,Mem)", hasSideEffects: true},     // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicExchange64Variant", argLength: 3, typ: "(UInt64,Mem)", hasSideEffects: true},     // Store arg1 to *arg0.  arg2=memory.  Returns old contents of *arg0 and new memory.
 	{name: "AtomicCompareAndSwap32Variant", argLength: 4, typ: "(Bool,Mem)", hasSideEffects: true}, // if *arg0==arg1, then set *arg0=arg2.  Returns true if store happens and new memory.
 	{name: "AtomicCompareAndSwap64Variant", argLength: 4, typ: "(Bool,Mem)", hasSideEffects: true}, // if *arg0==arg1, then set *arg0=arg2.  Returns true if store happens and new memory.
-	{name: "AtomicAnd8Variant", argLength: 3, typ: "Mem", hasSideEffects: true},                    // *arg0 &= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicAnd32Variant", argLength: 3, typ: "Mem", hasSideEffects: true},                   // *arg0 &= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicOr8Variant", argLength: 3, typ: "Mem", hasSideEffects: true},                     // *arg0 |= arg1.  arg2=memory.  Returns memory.
-	{name: "AtomicOr32Variant", argLength: 3, typ: "Mem", hasSideEffects: true},                    // *arg0 |= arg1.  arg2=memory.  Returns memory.
+	{name: "AtomicAnd64valueVariant", argLength: 3, typ: "(Uint64, Mem)", hasSideEffects: true},    // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr64valueVariant", argLength: 3, typ: "(Uint64, Mem)", hasSideEffects: true},     // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicAnd32valueVariant", argLength: 3, typ: "(Uint32, Mem)", hasSideEffects: true},    // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr32valueVariant", argLength: 3, typ: "(Uint32, Mem)", hasSideEffects: true},     // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicAnd8valueVariant", argLength: 3, typ: "(Uint8, Mem)", hasSideEffects: true},      // *arg0 &= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
+	{name: "AtomicOr8valueVariant", argLength: 3, typ: "(Uint8, Mem)", hasSideEffects: true},       // *arg0 |= arg1.  arg2=memory.  Returns old contents of *arg0 and new memory.
 
 	// Publication barrier
 	{name: "PubBarrier", argLength: 1, hasSideEffects: true}, // Do data barrier. arg0=memory.
@@ -630,21 +678,68 @@ var genericOps = []opData{
 	// Prefetch instruction
 	{name: "PrefetchCache", argLength: 2, hasSideEffects: true},         // Do prefetch arg0 to cache. arg0=addr, arg1=memory.
 	{name: "PrefetchCacheStreamed", argLength: 2, hasSideEffects: true}, // Do non-temporal or streamed prefetch arg0 to cache. arg0=addr, arg1=memory.
+
+	// Helper instruction which is semantically equivalent to calling runtime.memequal, but some targets may prefer to custom lower it later, e.g. for specific constant sizes.
+	{name: "MemEq", argLength: 4, commutative: true, typ: "Bool"}, // arg0=ptr0, arg1=ptr1, arg2=size, arg3=memory.
+
+	// SIMD
+	{name: "ZeroSIMD", argLength: 0}, // zero value of a vector
+
+	// Convert integers to masks
+	{name: "Cvt16toMask8x16", argLength: 1},  // arg0 = integer mask value
+	{name: "Cvt32toMask8x32", argLength: 1},  // arg0 = integer mask value
+	{name: "Cvt64toMask8x64", argLength: 1},  // arg0 = integer mask value
+	{name: "Cvt8toMask16x8", argLength: 1},   // arg0 = integer mask value
+	{name: "Cvt16toMask16x16", argLength: 1}, // arg0 = integer mask value
+	{name: "Cvt32toMask16x32", argLength: 1}, // arg0 = integer mask value
+	{name: "Cvt8toMask32x4", argLength: 1},   // arg0 = integer mask value
+	{name: "Cvt8toMask32x8", argLength: 1},   // arg0 = integer mask value
+	{name: "Cvt16toMask32x16", argLength: 1}, // arg0 = integer mask value
+	{name: "Cvt8toMask64x2", argLength: 1},   // arg0 = integer mask value
+	{name: "Cvt8toMask64x4", argLength: 1},   // arg0 = integer mask value
+	{name: "Cvt8toMask64x8", argLength: 1},   // arg0 = integer mask value
+
+	// Convert masks to integers
+	{name: "CvtMask8x16to16", argLength: 1},  // arg0 = mask
+	{name: "CvtMask8x32to32", argLength: 1},  // arg0 = mask
+	{name: "CvtMask8x64to64", argLength: 1},  // arg0 = mask
+	{name: "CvtMask16x8to8", argLength: 1},   // arg0 = mask
+	{name: "CvtMask16x16to16", argLength: 1}, // arg0 = mask
+	{name: "CvtMask16x32to32", argLength: 1}, // arg0 = mask
+	{name: "CvtMask32x4to8", argLength: 1},   // arg0 = mask
+	{name: "CvtMask32x8to8", argLength: 1},   // arg0 = mask
+	{name: "CvtMask32x16to16", argLength: 1}, // arg0 = mask
+	{name: "CvtMask64x2to8", argLength: 1},   // arg0 = mask
+	{name: "CvtMask64x4to8", argLength: 1},   // arg0 = mask
+	{name: "CvtMask64x8to8", argLength: 1},   // arg0 = mask
+
+	// Returns true if arg0 is all zero.
+	{name: "IsZeroVec", argLength: 1},
+
+	// Returns a mask indicating whether arg0's elements are NaN.
+	{name: "IsNaNFloat32x4", argLength: 1},
+	{name: "IsNaNFloat32x8", argLength: 1},
+	{name: "IsNaNFloat32x16", argLength: 1},
+	{name: "IsNaNFloat64x2", argLength: 1},
+	{name: "IsNaNFloat64x4", argLength: 1},
+	{name: "IsNaNFloat64x8", argLength: 1},
 }
 
-//     kind          controls        successors   implicit exit
-//   ----------------------------------------------------------
-//     Exit      [return mem]                []             yes
-//      Ret      [return mem]                []             yes
-//   RetJmp      [return mem]                []             yes
-//    Plain                []            [next]
-//       If   [boolean Value]      [then, else]
-//    First                []   [always, never]
+//     kind          controls          successors   implicit exit
+//   ------------------------------------------------------------
+//     Exit      [return mem]                  []             yes
+//      Ret      [return mem]                  []             yes
+//   RetJmp      [return mem]                  []             yes
+//    Plain                []              [next]
+//       If   [boolean Value]        [then, else]
+//    First                []     [always, never]
+//    Defer             [mem] [nopanic, recovery]                  (control opcode should be OpStaticCall to runtime.defer*)
+// JumpTable   [integer Value]   [succ1,succ2,..]
 
 var genericBlocks = []blockData{
 	{name: "Plain"},                  // a single successor
 	{name: "If", controls: 1},        // if Controls[0] goto Succs[0] else goto Succs[1]
-	{name: "Defer", controls: 1},     // Succs[0]=defer queued, Succs[1]=defer recovered. Controls[0] is call op (of memory type)
+	{name: "Defer", controls: 1},     // Succs[0]=defer queued, Succs[1]=defer recovery branch (jmp performed by runtime). Controls[0] is call op (of memory type).
 	{name: "Ret", controls: 1},       // no successors, Controls[0] value is memory result
 	{name: "RetJmp", controls: 1},    // no successors, Controls[0] value is a tail call
 	{name: "Exit", controls: 1},      // no successors, Controls[0] value generates a panic
@@ -655,6 +750,7 @@ var genericBlocks = []blockData{
 }
 
 func init() {
+	genericOps = append(genericOps, simdGenericOps()...)
 	archs = append(archs, arch{
 		name:    "generic",
 		ops:     genericOps,

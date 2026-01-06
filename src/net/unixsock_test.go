@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !js && !plan9 && !windows
+//go:build !plan9
 
 package net
 
@@ -20,6 +20,10 @@ import (
 func TestReadUnixgramWithUnnamedSocket(t *testing.T) {
 	if !testableNetwork("unixgram") {
 		t.Skip("unixgram test")
+	}
+	switch runtime.GOOS {
+	case "js", "wasip1":
+		t.Skipf("skipping: syscall.Socket not implemented on %s", runtime.GOOS)
 	}
 	if runtime.GOOS == "openbsd" {
 		testenv.SkipFlaky(t, 15157)
@@ -243,7 +247,6 @@ func TestUnixConnLocalAndRemoteNames(t *testing.T) {
 
 	handler := func(ls *localServer, ln Listener) {}
 	for _, laddr := range []string{"", testUnixAddr(t)} {
-		laddr := laddr
 		taddr := testUnixAddr(t)
 		ta, err := ResolveUnixAddr("unix", taddr)
 		if err != nil {
@@ -278,7 +281,7 @@ func TestUnixConnLocalAndRemoteNames(t *testing.T) {
 		}
 
 		switch runtime.GOOS {
-		case "android", "linux":
+		case "android", "linux", "windows":
 			if laddr == "" {
 				laddr = "@" // autobind feature
 			}
@@ -302,7 +305,6 @@ func TestUnixgramConnLocalAndRemoteNames(t *testing.T) {
 	}
 
 	for _, laddr := range []string{"", testUnixAddr(t)} {
-		laddr := laddr
 		taddr := testUnixAddr(t)
 		ta, err := ResolveUnixAddr("unixgram", taddr)
 		if err != nil {
@@ -359,6 +361,11 @@ func TestUnixUnlink(t *testing.T) {
 	if !testableNetwork("unix") {
 		t.Skip("unix test")
 	}
+	switch runtime.GOOS {
+	case "js", "wasip1":
+		t.Skipf("skipping: %s does not support Unlink", runtime.GOOS)
+	}
+
 	name := testUnixAddr(t)
 
 	listen := func(t *testing.T) *UnixListener {

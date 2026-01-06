@@ -32,11 +32,11 @@ var (
 
 var (
 	hexRe                 = regexp.MustCompile("0x[a-zA-Z0-9]+")
-	numRe                 = regexp.MustCompile("-?\\d+")
-	stringRe              = regexp.MustCompile("\"([^\\\"]|(\\.))*\"")
-	leadingDollarNumberRe = regexp.MustCompile("^[$]\\d+")
+	numRe                 = regexp.MustCompile(`-?\d+`)
+	stringRe              = regexp.MustCompile(`([^\"]|(\.))*`)
+	leadingDollarNumberRe = regexp.MustCompile(`^[$]\d+`)
 	optOutGdbRe           = regexp.MustCompile("[<]optimized out[>]")
-	numberColonRe         = regexp.MustCompile("^ *\\d+:")
+	numberColonRe         = regexp.MustCompile(`^ *\d+:`)
 )
 
 var gdb = "gdb"      // Might be "ggdb" on Darwin, because gdb no longer part of XCode
@@ -192,7 +192,7 @@ func skipSubTest(t *testing.T, tag string, basename string, gcflags string, coun
 		if *force {
 			testNexting(t, basename, tag, gcflags, count, moreargs...)
 		} else {
-			t.Skip("skipping flaky test becaused not forced (-f)")
+			t.Skip("skipping flaky test because not forced (-f)")
 		}
 	})
 }
@@ -222,15 +222,11 @@ func testNexting(t *testing.T, base, tag, gcflags string, count int, moreArgs ..
 
 	// Use a temporary directory unless -f is specified
 	if !*force {
-		tmpdir, err := os.MkdirTemp("", "debug_test")
-		if err != nil {
-			panic(fmt.Sprintf("Problem creating TempDir, error %v\n", err))
-		}
+		tmpdir := t.TempDir()
 		tmpbase = filepath.Join(tmpdir, "test-"+base+"."+tag)
 		if *verbose {
 			fmt.Printf("Tempdir is %s\n", tmpdir)
 		}
-		defer os.RemoveAll(tmpdir)
 	}
 	exe := tmpbase
 
@@ -244,9 +240,9 @@ func testNexting(t *testing.T, base, tag, gcflags string, count int, moreArgs ..
 	tmplog := tmpbase + ".nexts"
 	var dbg dbgr
 	if *useGdb {
-		dbg = newGdb(tag, exe)
+		dbg = newGdb(t, tag, exe)
 	} else {
-		dbg = newDelve(tag, exe)
+		dbg = newDelve(t, tag, exe)
 	}
 	h1 := runDbgr(dbg, count)
 	if *dryrun {
@@ -261,7 +257,7 @@ func testNexting(t *testing.T, base, tag, gcflags string, count int, moreArgs ..
 		if !h0.equals(h1) {
 			// Be very noisy about exactly what's wrong to simplify debugging.
 			h1.write(tmplog)
-			cmd := exec.Command("diff", "-u", nextlog, tmplog)
+			cmd := testenv.Command(t, "diff", "-u", nextlog, tmplog)
 			line := asCommandLine("", cmd)
 			bytes, err := cmd.CombinedOutput()
 			if err != nil && len(bytes) == 0 {
@@ -297,7 +293,7 @@ func runDbgr(dbg dbgr, maxNext int) *nextHist {
 
 func runGo(t *testing.T, dir string, args ...string) string {
 	var stdout, stderr strings.Builder
-	cmd := exec.Command(testenv.GoToolPath(t), args...)
+	cmd := testenv.Command(t, testenv.GoToolPath(t), args...)
 	cmd.Dir = dir
 	if *dryrun {
 		fmt.Printf("%s\n", asCommandLine("", cmd))
@@ -501,8 +497,8 @@ type delveState struct {
 	function         string
 }
 
-func newDelve(tag, executable string, args ...string) dbgr {
-	cmd := exec.Command("dlv", "exec", executable)
+func newDelve(t testing.TB, tag, executable string, args ...string) dbgr {
+	cmd := testenv.Command(t, "dlv", "exec", executable)
 	cmd.Env = replaceEnv(cmd.Env, "TERM", "dumb")
 	if len(args) > 0 {
 		cmd.Args = append(cmd.Args, "--")
@@ -586,16 +582,16 @@ type gdbState struct {
 	function         string
 }
 
-func newGdb(tag, executable string, args ...string) dbgr {
+func newGdb(t testing.TB, tag, executable string, args ...string) dbgr {
 	// Turn off shell, necessary for Darwin apparently
-	cmd := exec.Command(gdb, "-nx",
+	cmd := testenv.Command(t, gdb, "-nx",
 		"-iex", fmt.Sprintf("add-auto-load-safe-path %s/src/runtime", runtime.GOROOT()),
 		"-ex", "set startup-with-shell off", executable)
 	cmd.Env = replaceEnv(cmd.Env, "TERM", "dumb")
 	s := &gdbState{tagg: tag, cmd: cmd, args: args}
 	s.atLineRe = regexp.MustCompile("(^|\n)([0-9]+)(.*)")
 	s.funcFileLinePCre = regexp.MustCompile(
-		"([^ ]+) [(][^)]*[)][ \\t\\n]+at ([^:]+):([0-9]+)")
+		`([^ ]+) [(][^)]*[)][ \t\n]+at ([^:]+):([0-9]+)`)
 	// runtime.main () at /Users/drchase/GoogleDrive/work/go/src/runtime/proc.go:201
 	//                                    function              file    line
 	// Thread 2 hit Breakpoint 1, main.main () at /Users/drchase/GoogleDrive/work/debug/hist.go:18
@@ -698,7 +694,7 @@ func printVariableAndNormalize(v string, printer func(v string) string) string {
 	if dollar == -1 { // some not entirely expected response, whine and carry on.
 		if cr == -1 {
 			response = strings.TrimSpace(response) // discards trailing newline
-			response = strings.Replace(response, "\n", "<BR>", -1)
+			response = strings.ReplaceAll(response, "\n", "<BR>")
 			return "$ Malformed response " + response
 		}
 		response = strings.TrimSpace(response[:cr])
@@ -990,8 +986,8 @@ func asCommandLine(cwd string, cmd *exec.Cmd) string {
 
 // escape inserts escapes appropriate for use in a shell command line
 func escape(s string) string {
-	s = strings.Replace(s, "\\", "\\\\", -1)
-	s = strings.Replace(s, "'", "\\'", -1)
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
 	// Conservative guess at characters that will force quoting
 	if strings.ContainsAny(s, "\\ ;#*&$~?!|[]()<>{}`") {
 		s = " '" + s + "'"

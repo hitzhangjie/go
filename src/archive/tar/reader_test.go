@@ -7,14 +7,17 @@ package tar
 import (
 	"bytes"
 	"compress/bzip2"
-	"crypto/md5"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"internal/obscuretestdata"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,10 +26,11 @@ import (
 
 func TestReader(t *testing.T) {
 	vectors := []struct {
-		file    string    // Test input file
-		headers []*Header // Expected output headers
-		chksums []string  // MD5 checksum of files, leave as nil if not checked
-		err     error     // Expected error to occur
+		file     string    // Test input file
+		obscured bool      // Obscured with obscuretestdata package
+		headers  []*Header // Expected output headers
+		chksums  []string  // CRC32 checksum of files, leave as nil if not checked
+		err      error     // Expected error to occur
 	}{{
 		file: "testdata/gnu.tar",
 		headers: []*Header{{
@@ -53,8 +57,8 @@ func TestReader(t *testing.T) {
 			Format:   FormatGNU,
 		}},
 		chksums: []string{
-			"e38b27eaccb4391bdec553a7f3ae6b2f",
-			"c65bd2e50a56a2138bf1716f2fd56fe9",
+			"6cbd88fc",
+			"ddac04b3",
 		},
 	}, {
 		file: "testdata/sparse-formats.tar",
@@ -147,11 +151,11 @@ func TestReader(t *testing.T) {
 			Format:   FormatGNU,
 		}},
 		chksums: []string{
-			"6f53234398c2449fe67c1812d993012f",
-			"6f53234398c2449fe67c1812d993012f",
-			"6f53234398c2449fe67c1812d993012f",
-			"6f53234398c2449fe67c1812d993012f",
-			"b0061974914468de549a2af8ced10316",
+			"5375e1d2",
+			"5375e1d2",
+			"5375e1d2",
+			"5375e1d2",
+			"8eb179ba",
 		},
 	}, {
 		file: "testdata/star.tar",
@@ -268,7 +272,7 @@ func TestReader(t *testing.T) {
 			Format: FormatPAX,
 		}},
 		chksums: []string{
-			"0afb597b283fe61b5d4879669a350556",
+			"5fd7e86a",
 		},
 	}, {
 		file: "testdata/pax-records.tar",
@@ -521,8 +525,9 @@ func TestReader(t *testing.T) {
 		file: "testdata/pax-nul-path.tar",
 		err:  ErrHeader,
 	}, {
-		file: "testdata/neg-size.tar",
-		err:  ErrHeader,
+		file:     "testdata/neg-size.tar.base64",
+		obscured: true,
+		err:      ErrHeader,
 	}, {
 		file: "testdata/issue10968.tar",
 		err:  ErrHeader,
@@ -619,18 +624,32 @@ func TestReader(t *testing.T) {
 			},
 			Format: FormatPAX,
 		}},
+	}, {
+		// Small compressed file that uncompresses to
+		// a file with a very large GNU 1.0 sparse map.
+		file: "testdata/gnu-sparse-many-zeros.tar.bz2",
+		err:  errSparseTooLong,
 	}}
 
 	for _, v := range vectors {
-		t.Run(path.Base(v.file), func(t *testing.T) {
-			f, err := os.Open(v.file)
+		t.Run(strings.TrimSuffix(path.Base(v.file), ".base64"), func(t *testing.T) {
+			path := v.file
+			if v.obscured {
+				tf, err := obscuretestdata.DecodeToTempFile(path)
+				if err != nil {
+					t.Fatalf("obscuredtestdata.DecodeToTempFile(%s): %v", path, err)
+				}
+				path = tf
+			}
+
+			f, err := os.Open(path)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			defer f.Close()
 
 			var fr io.Reader = f
-			if strings.HasSuffix(v.file, ".bz2") {
+			if strings.HasSuffix(v.file, ".bz2") || strings.HasSuffix(v.file, ".bz2.base64") {
 				fr = bzip2.NewReader(fr)
 			}
 
@@ -655,7 +674,7 @@ func TestReader(t *testing.T) {
 				if v.chksums == nil {
 					continue
 				}
-				h := md5.New()
+				h := crc32.NewIEEE()
 				_, err = io.CopyBuffer(h, tr, rdbuf) // Effectively an incremental read
 				if err != nil {
 					break
@@ -768,7 +787,7 @@ type readBadSeeker struct{ io.ReadSeeker }
 
 func (rbs *readBadSeeker) Seek(int64, int) (int64, error) { return 0, fmt.Errorf("illegal seek") }
 
-// TestReadTruncation test the ending condition on various truncated files and
+// TestReadTruncation tests the ending condition on various truncated files and
 // that truncated files are still detected even if the underlying io.Reader
 // satisfies io.Seeker.
 func TestReadTruncation(t *testing.T) {
@@ -1017,7 +1036,7 @@ func TestParsePAX(t *testing.T) {
 	for i, v := range vectors {
 		r := strings.NewReader(v.in)
 		got, err := parsePAX(r)
-		if !reflect.DeepEqual(got, v.want) && !(len(got) == 0 && len(v.want) == 0) {
+		if !maps.Equal(got, v.want) && !(len(got) == 0 && len(v.want) == 0) {
 			t.Errorf("test %d, parsePAX():\ngot  %v\nwant %v", i, got, v.want)
 		}
 		if ok := err == nil; ok != v.ok {
@@ -1134,7 +1153,7 @@ func TestReadOldGNUSparseMap(t *testing.T) {
 		v.input = v.input[copy(blk[:], v.input):]
 		tr := Reader{r: bytes.NewReader(v.input)}
 		got, err := tr.readOldGNUSparseMap(&hdr, &blk)
-		if !equalSparseEntries(got, v.wantMap) {
+		if !slices.Equal(got, v.wantMap) {
 			t.Errorf("test %d, readOldGNUSparseMap(): got %v, want %v", i, got, v.wantMap)
 		}
 		if err != v.wantErr {
@@ -1325,7 +1344,7 @@ func TestReadGNUSparsePAXHeaders(t *testing.T) {
 		r := strings.NewReader(v.inputData + "#") // Add canary byte
 		tr := Reader{curr: &regFileReader{r, int64(r.Len())}}
 		got, err := tr.readGNUSparsePAXHeaders(&hdr)
-		if !equalSparseEntries(got, v.wantMap) {
+		if !slices.Equal(got, v.wantMap) {
 			t.Errorf("test %d, readGNUSparsePAXHeaders(): got %v, want %v", i, got, v.wantMap)
 		}
 		if err != v.wantErr {
@@ -1613,5 +1632,62 @@ func TestFileReader(t *testing.T) {
 				t.Fatalf("test %d.%d, unknown test operation: %T", i, j, tf)
 			}
 		}
+	}
+}
+
+func TestInsecurePaths(t *testing.T) {
+	t.Setenv("GODEBUG", "tarinsecurepath=0")
+	for _, path := range []string{
+		"../foo",
+		"/foo",
+		"a/b/../../../c",
+	} {
+		var buf bytes.Buffer
+		tw := NewWriter(&buf)
+		tw.WriteHeader(&Header{
+			Name: path,
+		})
+		const securePath = "secure"
+		tw.WriteHeader(&Header{
+			Name: securePath,
+		})
+		tw.Close()
+
+		tr := NewReader(&buf)
+		h, err := tr.Next()
+		if err != ErrInsecurePath {
+			t.Errorf("tr.Next for file %q: got err %v, want ErrInsecurePath", path, err)
+			continue
+		}
+		if h.Name != path {
+			t.Errorf("tr.Next for file %q: got name %q, want %q", path, h.Name, path)
+		}
+		// Error should not be sticky.
+		h, err = tr.Next()
+		if err != nil {
+			t.Errorf("tr.Next for file %q: got err %v, want nil", securePath, err)
+		}
+		if h.Name != securePath {
+			t.Errorf("tr.Next for file %q: got name %q, want %q", securePath, h.Name, securePath)
+		}
+	}
+}
+
+func TestDisableInsecurePathCheck(t *testing.T) {
+	t.Setenv("GODEBUG", "tarinsecurepath=1")
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	const name = "/foo"
+	tw.WriteHeader(&Header{
+		Name: name,
+	})
+	tw.Close()
+	tr := NewReader(&buf)
+	h, err := tr.Next()
+	if err != nil {
+		t.Fatalf("tr.Next with tarinsecurepath=1: got err %v, want nil", err)
+	}
+	if h.Name != name {
+		t.Fatalf("tr.Next with tarinsecurepath=1: got name %q, want %q", h.Name, name)
 	}
 }

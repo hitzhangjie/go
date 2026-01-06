@@ -7,7 +7,7 @@ package runtime
 import (
 	"internal/cpu"
 	"internal/goarch"
-	"runtime/internal/atomic"
+	"internal/runtime/atomic"
 	"unsafe"
 )
 
@@ -56,7 +56,7 @@ const (
 	spanSetInitSpineCap = 256 // Enough for 1GB heap on 64-bit
 )
 
-type spanSetBlock struct {
+type spanSetBlockHeader struct {
 	// Free spanSetBlocks are managed via a lock-free stack.
 	lfnode
 
@@ -64,6 +64,15 @@ type spanSetBlock struct {
 	// this block. This number is used to help determine when a block
 	// may be safely recycled.
 	popped atomic.Uint32
+}
+
+type spanSetBlockHeader2 struct {
+	spanSetBlockHeader
+	pad [tagAlign - unsafe.Sizeof(spanSetBlockHeader{})]byte
+}
+
+type spanSetBlock struct {
+	spanSetBlockHeader2
 
 	// spans is the set of spans in this block.
 	spans [spanSetBlockEntries]atomicMSpanPointer
@@ -140,6 +149,11 @@ retry:
 // pop is safe to call concurrently with other pop and push operations.
 func (b *spanSet) pop() *mspan {
 	var head, tail uint32
+	var backoff uint32
+	// TODO: tweak backoff parameters on other architectures.
+	if GOARCH == "arm64" {
+		backoff = 128
+	}
 claimLoop:
 	for {
 		headtail := b.index.load()
@@ -168,6 +182,14 @@ claimLoop:
 			if b.index.cas(headtail, makeHeadTailIndex(want+1, tail)) {
 				break claimLoop
 			}
+			// Use a backoff approach to reduce demand to the shared memory location
+			// decreases memory contention and allows for other threads to make quicker
+			// progress.
+			// Read more in this Arm blog post:
+			// https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/multi-threaded-applications-arm
+			procyield(backoff)
+			// Increase backoff time.
+			backoff += backoff / 2
 			headtail = b.index.load()
 			head, tail = headtail.split()
 		}
@@ -284,7 +306,7 @@ func (s *atomicSpanSetSpinePointer) Load() spanSetSpinePointer {
 
 // Stores the spanSetSpinePointer.
 //
-// It has the same semantics as atomic.UnsafePointer.
+// It has the same semantics as [atomic.UnsafePointer].
 func (s *atomicSpanSetSpinePointer) StoreNoWB(p spanSetSpinePointer) {
 	s.a.StoreNoWB(p.p)
 }
@@ -296,7 +318,7 @@ type spanSetSpinePointer struct {
 
 // lookup returns &s[idx].
 func (s spanSetSpinePointer) lookup(idx uintptr) *atomic.Pointer[spanSetBlock] {
-	return (*atomic.Pointer[spanSetBlock])(add(unsafe.Pointer(s.p), goarch.PtrSize*idx))
+	return (*atomic.Pointer[spanSetBlock])(add(s.p, goarch.PtrSize*idx))
 }
 
 // spanSetBlockPool is a global pool of spanSetBlocks.
@@ -313,7 +335,7 @@ func (p *spanSetBlockAlloc) alloc() *spanSetBlock {
 	if s := (*spanSetBlock)(p.stack.pop()); s != nil {
 		return s
 	}
-	return (*spanSetBlock)(persistentalloc(unsafe.Sizeof(spanSetBlock{}), cpu.CacheLineSize, &memstats.gcMiscSys))
+	return (*spanSetBlock)(persistentalloc(unsafe.Sizeof(spanSetBlock{}), max(cpu.CacheLineSize, tagAlign), &memstats.gcMiscSys))
 }
 
 // free returns a spanSetBlock back to the pool.
@@ -322,7 +344,7 @@ func (p *spanSetBlockAlloc) free(block *spanSetBlock) {
 	p.stack.push(&block.lfnode)
 }
 
-// haidTailIndex represents a combined 32-bit head and 32-bit tail
+// headTailIndex represents a combined 32-bit head and 32-bit tail
 // of a queue into a single 64-bit value.
 type headTailIndex uint64
 
@@ -398,7 +420,7 @@ func (p *atomicMSpanPointer) Load() *mspan {
 	return (*mspan)(p.p.Load())
 }
 
-// Store stores an *mspan.
+// StoreNoWB stores an *mspan.
 func (p *atomicMSpanPointer) StoreNoWB(s *mspan) {
 	p.p.StoreNoWB(unsafe.Pointer(s))
 }

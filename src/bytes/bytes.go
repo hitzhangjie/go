@@ -3,13 +3,15 @@
 // license that can be found in the LICENSE file.
 
 // Package bytes implements functions for the manipulation of byte slices.
-// It is analogous to the facilities of the strings package.
+// It is analogous to the facilities of the [strings] package.
 package bytes
 
 import (
 	"internal/bytealg"
+	"math/bits"
 	"unicode"
 	"unicode/utf8"
+	_ "unsafe" // for linkname
 )
 
 // Equal reports whether a and b
@@ -86,6 +88,11 @@ func ContainsRune(b []byte, r rune) bool {
 	return IndexRune(b, r) >= 0
 }
 
+// ContainsFunc reports whether any of the UTF-8-encoded code points r within b satisfy f(r).
+func ContainsFunc(b []byte, f func(rune) bool) bool {
+	return IndexFunc(b, f) >= 0
+}
+
 // IndexByte returns the index of the first instance of c in b, or -1 if c is not present in b.
 func IndexByte(b []byte, c byte) int {
 	return bytealg.IndexByte(b, c)
@@ -107,7 +114,7 @@ func LastIndex(s, sep []byte) int {
 	case n == 0:
 		return len(s)
 	case n == 1:
-		return LastIndexByte(s, sep[0])
+		return bytealg.LastIndexByte(s, sep[0])
 	case n == len(s):
 		if Equal(s, sep) {
 			return 0
@@ -116,43 +123,21 @@ func LastIndex(s, sep []byte) int {
 	case n > len(s):
 		return -1
 	}
-	// Rabin-Karp search from the end of the string
-	hashss, pow := bytealg.HashStrRevBytes(sep)
-	last := len(s) - n
-	var h uint32
-	for i := len(s) - 1; i >= last; i-- {
-		h = h*bytealg.PrimeRK + uint32(s[i])
-	}
-	if h == hashss && Equal(s[last:], sep) {
-		return last
-	}
-	for i := last - 1; i >= 0; i-- {
-		h *= bytealg.PrimeRK
-		h += uint32(s[i])
-		h -= pow * uint32(s[i+n])
-		if h == hashss && Equal(s[i:i+n], sep) {
-			return i
-		}
-	}
-	return -1
+	return bytealg.LastIndexRabinKarp(s, sep)
 }
 
 // LastIndexByte returns the index of the last instance of c in s, or -1 if c is not present in s.
 func LastIndexByte(s []byte, c byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
+	return bytealg.LastIndexByte(s, c)
 }
 
 // IndexRune interprets s as a sequence of UTF-8-encoded code points.
 // It returns the byte index of the first occurrence in s of the given rune.
 // It returns -1 if rune is not present in s.
-// If r is utf8.RuneError, it returns the first instance of any
+// If r is [utf8.RuneError], it returns the first instance of any
 // invalid UTF-8 byte sequence.
 func IndexRune(s []byte, r rune) int {
+	const haveFastIndex = bytealg.MaxBruteForce > 0
 	switch {
 	case 0 <= r && r < utf8.RuneSelf:
 		return IndexByte(s, byte(r))
@@ -168,9 +153,64 @@ func IndexRune(s []byte, r rune) int {
 	case !utf8.ValidRune(r):
 		return -1
 	default:
+		// Search for rune r using the last byte of its UTF-8 encoded form.
+		// The distribution of the last byte is more uniform compared to the
+		// first byte which has a 78% chance of being [240, 243, 244].
 		var b [utf8.UTFMax]byte
 		n := utf8.EncodeRune(b[:], r)
-		return Index(s, b[:n])
+		last := n - 1
+		i := last
+		fails := 0
+		for i < len(s) {
+			if s[i] != b[last] {
+				o := IndexByte(s[i+1:], b[last])
+				if o < 0 {
+					return -1
+				}
+				i += o + 1
+			}
+			// Step backwards comparing bytes.
+			for j := 1; j < n; j++ {
+				if s[i-j] != b[last-j] {
+					goto next
+				}
+			}
+			return i - last
+		next:
+			fails++
+			i++
+			if (haveFastIndex && fails > bytealg.Cutover(i)) && i < len(s) ||
+				(!haveFastIndex && fails >= 4+i>>4 && i < len(s)) {
+				goto fallback
+			}
+		}
+		return -1
+
+	fallback:
+		// Switch to bytealg.Index, if available, or a brute force search when
+		// IndexByte returns too many false positives.
+		if haveFastIndex {
+			if j := bytealg.Index(s[i-last:], b[:n]); j >= 0 {
+				return i + j - last
+			}
+		} else {
+			// If bytealg.Index is not available a brute force search is
+			// ~1.5-3x faster than Rabin-Karp since n is small.
+			c0 := b[last]
+			c1 := b[last-1] // There are at least 2 chars to match
+		loop:
+			for ; i < len(s); i++ {
+				if s[i] == c0 && s[i-1] == c1 {
+					for k := 2; k < n; k++ {
+						if s[i-k] != b[last-k] {
+							continue loop
+						}
+					}
+					return i - last
+				}
+			}
+		}
+		return -1
 	}
 }
 
@@ -372,22 +412,20 @@ func genSplit(s, sep []byte, sepSave, n int) [][]byte {
 // the subslices between those separators.
 // If sep is empty, SplitN splits after each UTF-8 sequence.
 // The count determines the number of subslices to return:
+//   - n > 0: at most n subslices; the last subslice will be the unsplit remainder;
+//   - n == 0: the result is nil (zero subslices);
+//   - n < 0: all subslices.
 //
-//	n > 0: at most n subslices; the last subslice will be the unsplit remainder.
-//	n == 0: the result is nil (zero subslices)
-//	n < 0: all subslices
-//
-// To split around the first instance of a separator, see Cut.
+// To split around the first instance of a separator, see [Cut].
 func SplitN(s, sep []byte, n int) [][]byte { return genSplit(s, sep, 0, n) }
 
 // SplitAfterN slices s into subslices after each instance of sep and
 // returns a slice of those subslices.
 // If sep is empty, SplitAfterN splits after each UTF-8 sequence.
 // The count determines the number of subslices to return:
-//
-//	n > 0: at most n subslices; the last subslice will be the unsplit remainder.
-//	n == 0: the result is nil (zero subslices)
-//	n < 0: all subslices
+//   - n > 0: at most n subslices; the last subslice will be the unsplit remainder;
+//   - n == 0: the result is nil (zero subslices);
+//   - n < 0: all subslices.
 func SplitAfterN(s, sep []byte, n int) [][]byte {
 	return genSplit(s, sep, len(sep), n)
 }
@@ -397,7 +435,7 @@ func SplitAfterN(s, sep []byte, n int) [][]byte {
 // If sep is empty, Split splits after each UTF-8 sequence.
 // It is equivalent to SplitN with a count of -1.
 //
-// To split around the first instance of a separator, see Cut.
+// To split around the first instance of a separator, see [Cut].
 func Split(s, sep []byte) [][]byte { return genSplit(s, sep, 0, -1) }
 
 // SplitAfter slices s into all subslices after each instance of sep and
@@ -412,8 +450,10 @@ var asciiSpace = [256]uint8{'\t': 1, '\n': 1, '\v': 1, '\f': 1, '\r': 1, ' ': 1}
 
 // Fields interprets s as a sequence of UTF-8-encoded code points.
 // It splits the slice s around each instance of one or more consecutive white space
-// characters, as defined by unicode.IsSpace, returning a slice of subslices of s or an
-// empty slice if s contains only white space.
+// characters, as defined by [unicode.IsSpace], returning a slice of subslices of s or an
+// empty slice if s contains only white space. Every element of the returned slice is
+// non-empty. Unlike [Split], leading and trailing runs of white space characters
+// are discarded.
 func Fields(s []byte) [][]byte {
 	// First count the fields.
 	// This is an exact count if s is ASCII, otherwise it is an approximation.
@@ -467,7 +507,9 @@ func Fields(s []byte) [][]byte {
 // FieldsFunc interprets s as a sequence of UTF-8-encoded code points.
 // It splits the slice s at each run of code points c satisfying f(c) and
 // returns a slice of subslices of s. If all code points in s satisfy f(c), or
-// len(s) == 0, an empty slice is returned.
+// len(s) == 0, an empty slice is returned. Every element of the returned slice is
+// non-empty. Unlike [Split], leading and trailing runs of code points
+// satisfying f(c) are discarded.
 //
 // FieldsFunc makes no guarantees about the order in which it calls f(c)
 // and assumes that f always returns the same value for a given c.
@@ -486,11 +528,7 @@ func FieldsFunc(s []byte, f func(rune) bool) [][]byte {
 	// more efficient, possibly due to cache effects.
 	start := -1 // valid span start if >= 0
 	for i := 0; i < len(s); {
-		size := 1
-		r := rune(s[i])
-		if r >= utf8.RuneSelf {
-			r, size = utf8.DecodeRune(s[i:])
-		}
+		r, size := utf8.DecodeRune(s[i:])
 		if f(r) {
 			if start >= 0 {
 				spans = append(spans, span{start, i})
@@ -528,12 +566,22 @@ func Join(s [][]byte, sep []byte) []byte {
 		// Just return a copy.
 		return append([]byte(nil), s[0]...)
 	}
-	n := len(sep) * (len(s) - 1)
+
+	var n int
+	if len(sep) > 0 {
+		if len(sep) >= maxInt/(len(s)-1) {
+			panic("bytes: Join output length overflow")
+		}
+		n += len(sep) * (len(s) - 1)
+	}
 	for _, v := range s {
+		if len(v) > maxInt-n {
+			panic("bytes: Join output length overflow")
+		}
 		n += len(v)
 	}
 
-	b := make([]byte, n)
+	b := bytealg.MakeNoZero(n)[:n:n]
 	bp := copy(b, s[0])
 	for _, v := range s[1:] {
 		bp += copy(b[bp:], sep)
@@ -542,12 +590,12 @@ func Join(s [][]byte, sep []byte) []byte {
 	return b
 }
 
-// HasPrefix tests whether the byte slice s begins with prefix.
+// HasPrefix reports whether the byte slice s begins with prefix.
 func HasPrefix(s, prefix []byte) bool {
-	return len(s) >= len(prefix) && Equal(s[0:len(prefix)], prefix)
+	return len(s) >= len(prefix) && Equal(s[:len(prefix)], prefix)
 }
 
-// HasSuffix tests whether the byte slice s ends with suffix.
+// HasSuffix reports whether the byte slice s ends with suffix.
 func HasSuffix(s, suffix []byte) bool {
 	return len(s) >= len(suffix) && Equal(s[len(s)-len(suffix):], suffix)
 }
@@ -562,11 +610,7 @@ func Map(mapping func(r rune) rune, s []byte) []byte {
 	// fine. It could also shrink but that falls out naturally.
 	b := make([]byte, 0, len(s))
 	for i := 0; i < len(s); {
-		wid := 1
-		r := rune(s[i])
-		if r >= utf8.RuneSelf {
-			r, wid = utf8.DecodeRune(s[i:])
-		}
+		r, wid := utf8.DecodeRune(s[i:])
 		r = mapping(r)
 		if r >= 0 {
 			b = utf8.AppendRune(b, r)
@@ -576,6 +620,18 @@ func Map(mapping func(r rune) rune, s []byte) []byte {
 	return b
 }
 
+// Despite being an exported symbol,
+// Repeat is linknamed by widely used packages.
+// Notable members of the hall of shame include:
+//   - gitee.com/quant1x/num
+//
+// Do not remove or change the type signature.
+// See go.dev/issue/67401.
+//
+// Note that this comment is not part of the doc comment.
+//
+//go:linkname Repeat
+
 // Repeat returns a new byte slice consisting of count copies of b.
 //
 // It panics if count is negative or if the result of (len(b) * count)
@@ -584,21 +640,22 @@ func Repeat(b []byte, count int) []byte {
 	if count == 0 {
 		return []byte{}
 	}
+
 	// Since we cannot return an error on overflow,
-	// we should panic if the repeat will generate
-	// an overflow.
+	// we should panic if the repeat will generate an overflow.
 	// See golang.org/issue/16237.
 	if count < 0 {
 		panic("bytes: negative Repeat count")
-	} else if len(b)*count/count != len(b) {
-		panic("bytes: Repeat count causes overflow")
 	}
+	hi, lo := bits.Mul(uint(len(b)), uint(count))
+	if hi > 0 || lo > uint(maxInt) {
+		panic("bytes: Repeat output length overflow")
+	}
+	n := int(lo) // lo = len(b) * count
 
 	if len(b) == 0 {
 		return []byte{}
 	}
-
-	n := len(b) * count
 
 	// Past a certain chunk size it is counterproductive to use
 	// larger chunks as the source of the write, as when the source
@@ -618,13 +675,10 @@ func Repeat(b []byte, count int) []byte {
 			chunkMax = len(b)
 		}
 	}
-	nb := make([]byte, n)
+	nb := bytealg.MakeNoZero(n)[:n:n]
 	bp := copy(nb, b)
-	for bp < len(nb) {
-		chunk := bp
-		if chunk > chunkMax {
-			chunk = chunkMax
-		}
+	for bp < n {
+		chunk := min(bp, chunkMax)
 		bp += copy(nb[bp:], nb[:chunk])
 	}
 	return nb
@@ -648,7 +702,7 @@ func ToUpper(s []byte) []byte {
 			// Just return a copy.
 			return append([]byte(""), s...)
 		}
-		b := make([]byte, len(s))
+		b := bytealg.MakeNoZero(len(s))[:len(s):len(s)]
 		for i := 0; i < len(s); i++ {
 			c := s[i]
 			if 'a' <= c && c <= 'z' {
@@ -678,7 +732,7 @@ func ToLower(s []byte) []byte {
 		if !hasUpper {
 			return append([]byte(""), s...)
 		}
-		b := make([]byte, len(s))
+		b := bytealg.MakeNoZero(len(s))[:len(s):len(s)]
 		for i := 0; i < len(s); i++ {
 			c := s[i]
 			if 'A' <= c && c <= 'Z' {
@@ -855,11 +909,7 @@ func LastIndexFunc(s []byte, f func(r rune) bool) int {
 func indexFunc(s []byte, f func(r rune) bool, truth bool) int {
 	start := 0
 	for start < len(s) {
-		wid := 1
-		r := rune(s[start])
-		if r >= utf8.RuneSelf {
-			r, wid = utf8.DecodeRune(s[start:])
-		}
+		r, wid := utf8.DecodeRune(s[start:])
 		if f(r) == truth {
 			return start
 		}
@@ -990,10 +1040,7 @@ func trimLeftASCII(s []byte, as *asciiSet) []byte {
 
 func trimLeftUnicode(s []byte, cutset string) []byte {
 	for len(s) > 0 {
-		r, n := rune(s[0]), 1
-		if r >= utf8.RuneSelf {
-			r, n = utf8.DecodeRune(s)
-		}
+		r, n := utf8.DecodeRune(s)
 		if !containsRune(cutset, r) {
 			break
 		}
@@ -1055,41 +1102,34 @@ func trimRightUnicode(s []byte, cutset string) []byte {
 // TrimSpace returns a subslice of s by slicing off all leading and
 // trailing white space, as defined by Unicode.
 func TrimSpace(s []byte) []byte {
-	// Fast path for ASCII: look for the first ASCII non-space byte
-	start := 0
-	for ; start < len(s); start++ {
-		c := s[start]
+	// Fast path for ASCII: look for the first ASCII non-space byte.
+	for lo, c := range s {
 		if c >= utf8.RuneSelf {
 			// If we run into a non-ASCII byte, fall back to the
-			// slower unicode-aware method on the remaining bytes
-			return TrimFunc(s[start:], unicode.IsSpace)
+			// slower unicode-aware method on the remaining bytes.
+			return TrimFunc(s[lo:], unicode.IsSpace)
 		}
-		if asciiSpace[c] == 0 {
-			break
+		if asciiSpace[c] != 0 {
+			continue
+		}
+		s = s[lo:]
+		// Now look for the first ASCII non-space byte from the end.
+		for hi := len(s) - 1; hi >= 0; hi-- {
+			c := s[hi]
+			if c >= utf8.RuneSelf {
+				return TrimFunc(s[:hi+1], unicode.IsSpace)
+			}
+			if asciiSpace[c] == 0 {
+				// At this point, s[:hi+1] starts and ends with ASCII
+				// non-space bytes, so we're done. Non-ASCII cases have
+				// already been handled above.
+				return s[:hi+1]
+			}
 		}
 	}
-
-	// Now look for the first ASCII non-space byte from the end
-	stop := len(s)
-	for ; stop > start; stop-- {
-		c := s[stop-1]
-		if c >= utf8.RuneSelf {
-			return TrimFunc(s[start:stop], unicode.IsSpace)
-		}
-		if asciiSpace[c] == 0 {
-			break
-		}
-	}
-
-	// At this point s[start:stop] starts and ends with an ASCII
-	// non-space bytes, so we're done. Non-ASCII cases have already
-	// been handled above.
-	if start == stop {
-		// Special case to preserve previous TrimLeftFunc behavior,
-		// returning nil instead of empty slice if all spaces.
-		return nil
-	}
-	return s[start:stop]
+	// Special case to preserve previous TrimLeftFunc behavior,
+	// returning nil instead of empty slice if all spaces.
+	return nil
 }
 
 // Runes interprets s as a sequence of UTF-8-encoded code points.
@@ -1130,19 +1170,22 @@ func Replace(s, old, new []byte, n int) []byte {
 	t := make([]byte, len(s)+n*(len(new)-len(old)))
 	w := 0
 	start := 0
-	for i := 0; i < n; i++ {
-		j := start
-		if len(old) == 0 {
-			if i > 0 {
-				_, wid := utf8.DecodeRune(s[start:])
-				j += wid
-			}
-		} else {
-			j += Index(s[start:], old)
+	if len(old) > 0 {
+		for range n {
+			j := start + Index(s[start:], old)
+			w += copy(t[w:], s[start:j])
+			w += copy(t[w:], new)
+			start = j + len(old)
 		}
-		w += copy(t[w:], s[start:j])
+	} else { // len(old) == 0
 		w += copy(t[w:], new)
-		start = j + len(old)
+		for range n - 1 {
+			_, wid := utf8.DecodeRune(s[start:])
+			j := start + wid
+			w += copy(t[w:], s[start:j])
+			w += copy(t[w:], new)
+			start = j
+		}
 	}
 	w += copy(t[w:], s[start:])
 	return t[0:w]
@@ -1163,7 +1206,7 @@ func ReplaceAll(s, old, new []byte) []byte {
 func EqualFold(s, t []byte) bool {
 	// ASCII fast path
 	i := 0
-	for ; i < len(s) && i < len(t); i++ {
+	for n := min(len(s), len(t)); i < n; i++ {
 		sr := s[i]
 		tr := t[i]
 		if sr|tr >= utf8.RuneSelf {
@@ -1193,19 +1236,10 @@ hasUnicode:
 	t = t[i:]
 	for len(s) != 0 && len(t) != 0 {
 		// Extract first rune from each.
-		var sr, tr rune
-		if s[0] < utf8.RuneSelf {
-			sr, s = rune(s[0]), s[1:]
-		} else {
-			r, size := utf8.DecodeRune(s)
-			sr, s = r, s[size:]
-		}
-		if t[0] < utf8.RuneSelf {
-			tr, t = rune(t[0]), t[1:]
-		} else {
-			r, size := utf8.DecodeRune(t)
-			tr, t = r, t[size:]
-		}
+		sr, size := utf8.DecodeRune(s)
+		s = s[size:]
+		tr, size := utf8.DecodeRune(t)
+		t = t[size:]
 
 		// If they match, keep going; if not, return false.
 
@@ -1321,7 +1355,7 @@ func Index(s, sep []byte) int {
 			// we should cutover at even larger average skips,
 			// because Equal becomes that much more expensive.
 			// This code does not take that effect into account.
-			j := bytealg.IndexRabinKarpBytes(s[i:], sep)
+			j := bytealg.IndexRabinKarp(s[i:], sep)
 			if j < 0 {
 				return -1
 			}

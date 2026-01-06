@@ -55,11 +55,11 @@ func readCOFFSymbols(fh *FileHeader, r io.ReadSeeker) ([]COFFSymbol, error) {
 	if fh.NumberOfSymbols <= 0 {
 		return nil, nil
 	}
-	_, err := r.Seek(int64(fh.PointerToSymbolTable), seekStart)
+	_, err := r.Seek(int64(fh.PointerToSymbolTable), io.SeekStart)
 	if err != nil {
 		return nil, fmt.Errorf("fail to seek to symbol table: %v", err)
 	}
-	c := saferio.SliceCap((*COFFSymbol)(nil), uint64(fh.NumberOfSymbols))
+	c := saferio.SliceCap[COFFSymbol](uint64(fh.NumberOfSymbols))
 	if c < 0 {
 		return nil, errors.New("too many symbols; file may be corrupt")
 	}
@@ -98,7 +98,12 @@ func readCOFFSymbols(fh *FileHeader, r io.ReadSeeker) ([]COFFSymbol, error) {
 // isSymNameOffset checks symbol name if it is encoded as offset into string table.
 func isSymNameOffset(name [8]byte) (bool, uint32) {
 	if name[0] == 0 && name[1] == 0 && name[2] == 0 && name[3] == 0 {
-		return true, binary.LittleEndian.Uint32(name[4:])
+		offset := binary.LittleEndian.Uint32(name[4:])
+		if offset == 0 {
+			// symbol has no name
+			return false, 0
+		}
+		return true, offset
 	}
 	return false, 0
 }
@@ -141,7 +146,7 @@ func removeAuxSymbols(allsyms []COFFSymbol, st StringTable) ([]*Symbol, error) {
 	return syms, nil
 }
 
-// Symbol is similar to COFFSymbol with Name field replaced
+// Symbol is similar to [COFFSymbol] with Name field replaced
 // by Go string. Symbol also does not have NumberOfAuxSymbols.
 type Symbol struct {
 	Name          string
@@ -180,9 +185,9 @@ const (
 	IMAGE_COMDAT_SELECT_LARGEST      = 6
 )
 
-// COFFSymbolReadSectionDefAux returns a blob of axiliary information
+// COFFSymbolReadSectionDefAux returns a blob of auxiliary information
 // (including COMDAT info) for a section definition symbol. Here 'idx'
-// is the index of a section symbol in the main COFFSymbol array for
+// is the index of a section symbol in the main [COFFSymbol] array for
 // the File. Return value is a pointer to the appropriate aux symbol
 // struct. For more info, see:
 //

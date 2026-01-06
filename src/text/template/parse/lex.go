@@ -352,6 +352,7 @@ func lexComment(l *lexer) stateFn {
 	if !delim {
 		return l.errorf("comment ends before closing delimiter")
 	}
+	l.line += strings.Count(l.input[l.start:l.pos], "\n")
 	i := l.thisItem(itemComment)
 	if trimSpace {
 		l.pos += trimMarkerLen
@@ -520,7 +521,7 @@ func lexVariable(l *lexer) stateFn {
 	return lexFieldOrVariable(l, itemVariable)
 }
 
-// lexVariable scans a field or variable: [.$]Alphanumeric.
+// lexFieldOrVariable scans a field or variable: [.$]Alphanumeric.
 // The . or $ has been scanned.
 func lexFieldOrVariable(l *lexer, typ itemType) stateFn {
 	if l.atTerminator() { // Nothing interesting follows -> "." or "$".

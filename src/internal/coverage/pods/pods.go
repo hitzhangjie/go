@@ -5,13 +5,15 @@
 package pods
 
 import (
+	"cmp"
 	"fmt"
 	"internal/coverage"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // Pod encapsulates a set of files emitted during the executions of a
@@ -165,8 +167,11 @@ func collectPodsImpl(files []string, dirIndices []int, warn bool) []Pod {
 	}
 	pods := make([]Pod, 0, len(mm))
 	for _, p := range mm {
-		sort.Slice(p.elements, func(i, j int) bool {
-			return p.elements[i].file < p.elements[j].file
+		slices.SortFunc(p.elements, func(a, b fileWithAnnotations) int {
+			if r := cmp.Compare(a.origin, b.origin); r != 0 {
+				return r
+			}
+			return strings.Compare(a.file, b.file)
 		})
 		pod := Pod{
 			MetaFile:         p.mf,
@@ -181,13 +186,13 @@ func collectPodsImpl(files []string, dirIndices []int, warn bool) []Pod {
 		}
 		pods = append(pods, pod)
 	}
-	sort.Slice(pods, func(i, j int) bool {
-		return pods[i].MetaFile < pods[j].MetaFile
+	slices.SortFunc(pods, func(a, b Pod) int {
+		return strings.Compare(a.MetaFile, b.MetaFile)
 	})
 	return pods
 }
 
-func warning(s string, a ...interface{}) {
+func warning(s string, a ...any) {
 	fmt.Fprintf(os.Stderr, "warning: ")
 	fmt.Fprintf(os.Stderr, s, a...)
 	fmt.Fprintf(os.Stderr, "\n")

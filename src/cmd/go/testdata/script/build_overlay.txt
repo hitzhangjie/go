@@ -22,6 +22,8 @@ go build -overlay overlay.json -o print_abspath$GOEXE ./printpath
 exec ./print_abspath$GOEXE
 stdout $WORK[/\\]gopath[/\\]src[/\\]m[/\\]printpath[/\\]main.go
 
+go vet -overlay overlay.json ./printpath
+
 go build -overlay overlay.json -o print_trimpath$GOEXE -trimpath ./printpath
 exec ./print_trimpath$GOEXE
 stdout ^m[/\\]printpath[/\\]main.go
@@ -83,11 +85,6 @@ go build -compiler=gccgo -overlay overlay.json -o print_trimpath_gccgo$GOEXE -tr
 exec ./print_trimpath_gccgo$GOEXE
 stdout ^\.[/\\]printpath[/\\]main.go
 
-go build -compiler=gccgo -overlay overlay.json -o main_call_asm_gccgo$GOEXE ./call_asm
-exec ./main_call_asm_gccgo$GOEXE
-! stdout .
-
-skip 'broken as of CL 421879: see https://go.dev/issue/54761'
 
 go build -compiler=gccgo  -overlay overlay.json -o main_cgo_replace_gccgo$GOEXE ./cgo_hello_replace
 exec ./main_cgo_replace_gccgo$GOEXE
@@ -100,6 +97,10 @@ stdout '^hello cgo\r?\n'
 go build -compiler=gccgo  -overlay overlay.json -o main_cgo_angle_gccgo$GOEXE ./cgo_hello_angle
 exec ./main_cgo_angle_gccgo$GOEXE
 stdout '^hello cgo\r?\n'
+
+go build -compiler=gccgo -overlay overlay.json -o main_call_asm_gccgo$GOEXE ./call_asm
+exec ./main_call_asm_gccgo$GOEXE
+! stdout .
 
 
 -- m/go.mod --

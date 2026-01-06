@@ -7,7 +7,7 @@ package p
 import "unsafe"
 
 type T[P any] struct {
-	T /* ERROR   invalid recursive type */ [P]
+	T /* ERROR "invalid recursive type" */ [P]
 }
 
 func _[P any]() {
@@ -18,6 +18,4 @@ func _[P any]() {
 	_ = unsafe.Sizeof(struct{ T[P] }{})
 }
 
-// TODO(gri) This is a follow-on error due to T[int] being invalid.
-//           We should try to avoid it.
-const _ = unsafe /* ERROR not constant */ .Sizeof(T[int]{})
+const _ = unsafe.Sizeof(T /* ERROR "invalid recursive type" */ [int]{})

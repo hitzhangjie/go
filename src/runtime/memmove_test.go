@@ -8,6 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"internal/asan"
+	"internal/msan"
 	"internal/race"
 	"internal/testenv"
 	. "runtime"
@@ -102,8 +104,8 @@ func TestMemmoveLarge0x180000(t *testing.T) {
 	}
 
 	t.Parallel()
-	if race.Enabled {
-		t.Skip("skipping large memmove test under race detector")
+	if race.Enabled || asan.Enabled || msan.Enabled {
+		t.Skip("skipping large memmove test under sanitizers")
 	}
 	testSize(t, 0x180000)
 }
@@ -114,8 +116,8 @@ func TestMemmoveOverlapLarge0x120000(t *testing.T) {
 	}
 
 	t.Parallel()
-	if race.Enabled {
-		t.Skip("skipping large memmove test under race detector")
+	if race.Enabled || asan.Enabled || msan.Enabled {
+		t.Skip("skipping large memmove test under sanitizers")
 	}
 	testOverlap(t, 0x120000)
 }
@@ -219,8 +221,6 @@ func TestMemmoveAtomicity(t *testing.T) {
 
 	for _, backward := range []bool{true, false} {
 		for _, n := range []int{3, 4, 5, 6, 7, 8, 9, 10, 15, 25, 49} {
-			n := n
-
 			// test copying [N]*int.
 			sz := uintptr(n * PtrSize)
 			name := fmt.Sprint(sz)
@@ -240,9 +240,7 @@ func TestMemmoveAtomicity(t *testing.T) {
 				for i := range src {
 					src[i] = &x
 				}
-				for i := range dst {
-					dst[i] = nil
-				}
+				clear(dst)
 
 				var ready atomic.Uint32
 				go func() {
@@ -294,6 +292,7 @@ func BenchmarkMemmove(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n)
 		y := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x, y)
 		}
@@ -303,6 +302,7 @@ func BenchmarkMemmove(b *testing.B) {
 func BenchmarkMemmoveOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+16)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[16:n+16], x[:n])
 		}
@@ -313,6 +313,7 @@ func BenchmarkMemmoveUnalignedDst(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n+1)
 		y := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[1:], y)
 		}
@@ -322,6 +323,7 @@ func BenchmarkMemmoveUnalignedDst(b *testing.B) {
 func BenchmarkMemmoveUnalignedDstOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+16)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[16:n+16], x[1:n+1])
 		}
@@ -332,15 +334,40 @@ func BenchmarkMemmoveUnalignedSrc(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n)
 		y := make([]byte, n+1)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x, y[1:])
 		}
 	})
 }
 
+func BenchmarkMemmoveUnalignedSrcDst(b *testing.B) {
+	for _, n := range []int{16, 64, 256, 4096, 65536} {
+		buf := make([]byte, (n+8)*2)
+		x := buf[:len(buf)/2]
+		y := buf[len(buf)/2:]
+		for _, off := range []int{0, 1, 4, 7} {
+			b.Run(fmt.Sprint("f_", n, off), func(b *testing.B) {
+				b.SetBytes(int64(n))
+				for i := 0; i < b.N; i++ {
+					copy(x[off:n+off], y[off:n+off])
+				}
+			})
+
+			b.Run(fmt.Sprint("b_", n, off), func(b *testing.B) {
+				b.SetBytes(int64(n))
+				for i := 0; i < b.N; i++ {
+					copy(y[off:n+off], x[off:n+off])
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkMemmoveUnalignedSrcOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+1)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[1:n+1], x[:n])
 		}
@@ -400,13 +427,38 @@ func BenchmarkMemclr(b *testing.B) {
 	}
 }
 
+func BenchmarkMemclrUnaligned(b *testing.B) {
+	for _, off := range []int{0, 1, 4, 7} {
+		for _, n := range []int{5, 16, 64, 256, 4096, 65536} {
+			x := make([]byte, n+off)
+			b.Run(fmt.Sprint(off, n), func(b *testing.B) {
+				b.SetBytes(int64(n))
+				for i := 0; i < b.N; i++ {
+					MemclrBytes(x[off:])
+				}
+			})
+		}
+	}
+
+	for _, off := range []int{0, 1, 4, 7} {
+		for _, m := range []int{1, 4, 8, 16, 64} {
+			x := make([]byte, (m<<20)+off)
+			b.Run(fmt.Sprint(off, m, "M"), func(b *testing.B) {
+				b.SetBytes(int64(m << 20))
+				for i := 0; i < b.N; i++ {
+					MemclrBytes(x[off:])
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkGoMemclr(b *testing.B) {
 	benchmarkSizes(b, []int{5, 16, 64, 256}, func(b *testing.B, n int) {
 		x := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			for j := range x {
-				x[j] = 0
-			}
+			clear(x)
 		}
 	})
 }
@@ -439,9 +491,7 @@ func BenchmarkMemclrRange(b *testing.B) {
 		maxLen := 0
 
 		for _, clrLen := range t.data {
-			if clrLen > maxLen {
-				maxLen = clrLen
-			}
+			maxLen = max(maxLen, clrLen)
 			if clrLen < minLen || minLen == 0 {
 				minLen = clrLen
 			}
@@ -468,6 +518,42 @@ func BenchmarkMemclrRange(b *testing.B) {
 	}
 }
 
+func BenchmarkClearFat3(b *testing.B) {
+	p := new([3]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [3]byte{}
+	}
+}
+
+func BenchmarkClearFat4(b *testing.B) {
+	p := new([4 / 4]uint32)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [4 / 4]uint32{}
+	}
+}
+
+func BenchmarkClearFat5(b *testing.B) {
+	p := new([5]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [5]byte{}
+	}
+}
+
+func BenchmarkClearFat6(b *testing.B) {
+	p := new([6]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [6]byte{}
+	}
+}
+
 func BenchmarkClearFat7(b *testing.B) {
 	p := new([7]byte)
 	Escape(p)
@@ -483,6 +569,24 @@ func BenchmarkClearFat8(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		*p = [8 / 4]uint32{}
+	}
+}
+
+func BenchmarkClearFat9(b *testing.B) {
+	p := new([9]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [9]byte{}
+	}
+}
+
+func BenchmarkClearFat10(b *testing.B) {
+	p := new([10]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [10]byte{}
 	}
 }
 
@@ -537,6 +641,24 @@ func BenchmarkClearFat16(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		*p = [16 / 4]uint32{}
+	}
+}
+
+func BenchmarkClearFat18(b *testing.B) {
+	p := new([18]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [18]byte{}
+	}
+}
+
+func BenchmarkClearFat20(b *testing.B) {
+	p := new([20 / 4]uint32)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = [20 / 4]uint32{}
 	}
 }
 
@@ -657,6 +779,46 @@ func BenchmarkClearFat1040(b *testing.B) {
 	}
 }
 
+func BenchmarkCopyFat3(b *testing.B) {
+	var x [3]byte
+	p := new([3]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat4(b *testing.B) {
+	var x [4 / 4]uint32
+	p := new([4 / 4]uint32)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat5(b *testing.B) {
+	var x [5]byte
+	p := new([5]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat6(b *testing.B) {
+	var x [6]byte
+	p := new([6]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
 func BenchmarkCopyFat7(b *testing.B) {
 	var x [7]byte
 	p := new([7]byte)
@@ -670,6 +832,26 @@ func BenchmarkCopyFat7(b *testing.B) {
 func BenchmarkCopyFat8(b *testing.B) {
 	var x [8 / 4]uint32
 	p := new([8 / 4]uint32)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat9(b *testing.B) {
+	var x [9]byte
+	p := new([9]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat10(b *testing.B) {
+	var x [10]byte
+	p := new([10]byte)
 	Escape(p)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -730,6 +912,26 @@ func BenchmarkCopyFat15(b *testing.B) {
 func BenchmarkCopyFat16(b *testing.B) {
 	var x [16 / 4]uint32
 	p := new([16 / 4]uint32)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat18(b *testing.B) {
+	var x [18]byte
+	p := new([18]byte)
+	Escape(p)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		*p = x
+	}
+}
+
+func BenchmarkCopyFat20(b *testing.B) {
+	var x [20 / 4]uint32
+	p := new([20 / 4]uint32)
 	Escape(p)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -873,4 +1075,302 @@ func BenchmarkIssue18740(b *testing.B) {
 			}
 		})
 	}
+}
+
+var memclrSink []int8
+
+func BenchmarkMemclrKnownSize1(b *testing.B) {
+	var x [1]int8
+
+	b.SetBytes(1)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize2(b *testing.B) {
+	var x [2]int8
+
+	b.SetBytes(2)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize4(b *testing.B) {
+	var x [4]int8
+
+	b.SetBytes(4)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize8(b *testing.B) {
+	var x [8]int8
+
+	b.SetBytes(8)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize16(b *testing.B) {
+	var x [16]int8
+
+	b.SetBytes(16)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize32(b *testing.B) {
+	var x [32]int8
+
+	b.SetBytes(32)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize64(b *testing.B) {
+	var x [64]int8
+
+	b.SetBytes(64)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize112(b *testing.B) {
+	var x [112]int8
+
+	b.SetBytes(112)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+
+func BenchmarkMemclrKnownSize128(b *testing.B) {
+	var x [128]int8
+
+	b.SetBytes(128)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+
+func BenchmarkMemclrKnownSize192(b *testing.B) {
+	var x [192]int8
+
+	b.SetBytes(192)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+
+func BenchmarkMemclrKnownSize248(b *testing.B) {
+	var x [248]int8
+
+	b.SetBytes(248)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+
+func BenchmarkMemclrKnownSize256(b *testing.B) {
+	var x [256]int8
+
+	b.SetBytes(256)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize512(b *testing.B) {
+	var x [512]int8
+
+	b.SetBytes(512)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize1024(b *testing.B) {
+	var x [1024]int8
+
+	b.SetBytes(1024)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize4096(b *testing.B) {
+	var x [4096]int8
+
+	b.SetBytes(4096)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+func BenchmarkMemclrKnownSize512KiB(b *testing.B) {
+	var x [524288]int8
+
+	b.SetBytes(524288)
+	for i := 0; i < b.N; i++ {
+		for a := range x {
+			x[a] = 0
+		}
+	}
+
+	memclrSink = x[:]
+}
+
+func BenchmarkMemmoveKnownSize112(b *testing.B) {
+	type T struct {
+		x [112]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize128(b *testing.B) {
+	type T struct {
+		x [128]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize192(b *testing.B) {
+	type T struct {
+		x [192]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize248(b *testing.B) {
+	type T struct {
+		x [248]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize256(b *testing.B) {
+	type T struct {
+		x [256]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize512(b *testing.B) {
+	type T struct {
+		x [512]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
+}
+func BenchmarkMemmoveKnownSize1024(b *testing.B) {
+	type T struct {
+		x [1024]int8
+	}
+	p := &T{}
+	q := &T{}
+
+	b.SetBytes(int64(unsafe.Sizeof(T{})))
+	for i := 0; i < b.N; i++ {
+		*p = *q
+	}
+
+	memclrSink = p.x[:]
 }

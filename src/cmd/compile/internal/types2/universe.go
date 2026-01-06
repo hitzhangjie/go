@@ -21,9 +21,11 @@ var Unsafe *Package
 
 var (
 	universeIota       Object
+	universeBool       Type
 	universeByte       Type // uint8 alias, but has name "byte"
 	universeRune       Type // int32 alias, but has name "rune"
-	universeAny        Object
+	universeAnyNoAlias *TypeName
+	universeAnyAlias   *TypeName
 	universeError      Type
 	universeComparable Object
 )
@@ -65,7 +67,7 @@ var Typ = [...]*Basic{
 	UntypedNil:     {UntypedNil, IsUntyped, "untyped nil"},
 }
 
-var aliases = [...]*Basic{
+var basicAliases = [...]*Basic{
 	{Byte, IsInteger | IsUnsigned, "byte"},
 	{Rune, IsInteger, "rune"},
 }
@@ -74,25 +76,48 @@ func defPredeclaredTypes() {
 	for _, t := range Typ {
 		def(NewTypeName(nopos, nil, t.name, t))
 	}
-	for _, t := range aliases {
+	for _, t := range basicAliases {
 		def(NewTypeName(nopos, nil, t.name, t))
 	}
 
 	// type any = interface{}
-	// Note: don't use &emptyInterface for the type of any. Using a unique
-	// pointer allows us to detect any and format it as "any" rather than
-	// interface{}, which clarifies user-facing error messages significantly.
-	def(NewTypeName(nopos, nil, "any", &Interface{complete: true, tset: &topTypeSet}))
+	//
+	// Implement two representations of any: one for the legacy gotypesalias=0,
+	// and one for gotypesalias=1. This is necessary for consistent
+	// representation of interface aliases during type checking, and is
+	// implemented via hijacking [Scope.Lookup] for the [Universe] scope.
+	//
+	// Both representations use the same distinguished pointer for their RHS
+	// interface type, allowing us to detect any (even with the legacy
+	// representation), and format it as "any" rather than interface{}, which
+	// clarifies user-facing error messages significantly.
+	//
+	// TODO(rfindley): once the gotypesalias GODEBUG variable is obsolete (and we
+	// consistently use the Alias node), we should be able to clarify user facing
+	// error messages without using a distinguished pointer for the any
+	// interface.
+	{
+		universeAnyNoAlias = NewTypeName(nopos, nil, "any", &Interface{complete: true, tset: &topTypeSet})
+		// ensure that the any TypeName reports a consistent Parent, after
+		// hijacking Universe.Lookup with gotypesalias=0.
+		universeAnyNoAlias.setParent(Universe)
+
+		// It shouldn't matter which representation of any is actually inserted
+		// into the Universe, but we lean toward the future and insert the Alias
+		// representation.
+		universeAnyAlias = NewTypeName(nopos, nil, "any", nil)
+		_ = NewAlias(universeAnyAlias, universeAnyNoAlias.Type().Underlying()) // Link TypeName and Alias
+		def(universeAnyAlias)
+	}
 
 	// type error interface{ Error() string }
 	{
 		obj := NewTypeName(nopos, nil, "error", nil)
-		obj.setColor(black)
-		typ := NewNamed(obj, nil, nil)
+		typ := (*Checker)(nil).newNamed(obj, nil, nil)
 
 		// error.Error() string
-		recv := NewVar(nopos, nil, "", typ)
-		res := NewVar(nopos, nil, "", Typ[String])
+		recv := newVar(RecvVar, nopos, nil, "", typ)
+		res := newVar(ResultVar, nopos, nil, "", Typ[String])
 		sig := NewSignatureType(recv, nil, nil, nil, NewTuple(res), false)
 		err := NewFunc(nopos, nil, "Error", sig)
 
@@ -100,20 +125,21 @@ func defPredeclaredTypes() {
 		ityp := &Interface{methods: []*Func{err}, complete: true}
 		computeInterfaceTypeSet(nil, nopos, ityp) // prevent races due to lazy computation of tset
 
-		typ.SetUnderlying(ityp)
+		typ.fromRHS = ityp
+		typ.Underlying()
 		def(obj)
 	}
 
 	// type comparable interface{} // marked as comparable
 	{
 		obj := NewTypeName(nopos, nil, "comparable", nil)
-		obj.setColor(black)
-		typ := NewNamed(obj, nil, nil)
+		typ := (*Checker)(nil).newNamed(obj, nil, nil)
 
 		// interface{} // marked as comparable
 		ityp := &Interface{complete: true, tset: &_TypeSet{nil, allTermlist, true}}
 
-		typ.SetUnderlying(ityp)
+		typ.fromRHS = ityp
+		typ.Underlying()
 		def(obj)
 	}
 }
@@ -135,7 +161,7 @@ func defPredeclaredConsts() {
 }
 
 func defPredeclaredNil() {
-	def(&Nil{object{name: "nil", typ: Typ[UntypedNil], color_: black}})
+	def(&Nil{object{name: "nil", typ: Typ[UntypedNil]}})
 }
 
 // A builtinId is the id of a builtin function.
@@ -145,6 +171,7 @@ const (
 	// universe scope
 	_Append builtinId = iota
 	_Cap
+	_Clear
 	_Close
 	_Complex
 	_Copy
@@ -152,6 +179,8 @@ const (
 	_Imag
 	_Len
 	_Make
+	_Max
+	_Min
 	_New
 	_Panic
 	_Print
@@ -182,6 +211,7 @@ var predeclaredFuncs = [...]struct {
 }{
 	_Append:  {"append", 1, true, expression},
 	_Cap:     {"cap", 1, false, expression},
+	_Clear:   {"clear", 1, false, statement},
 	_Close:   {"close", 1, false, statement},
 	_Complex: {"complex", 2, false, expression},
 	_Copy:    {"copy", 2, false, statement},
@@ -189,6 +219,9 @@ var predeclaredFuncs = [...]struct {
 	_Imag:    {"imag", 1, false, expression},
 	_Len:     {"len", 1, false, expression},
 	_Make:    {"make", 1, true, expression},
+	// To disable max/min, remove the next two lines.
+	_Max:     {"max", 1, true, expression},
+	_Min:     {"min", 1, true, expression},
 	_New:     {"new", 1, false, expression},
 	_Panic:   {"panic", 1, false, statement},
 	_Print:   {"print", 0, true, statement},
@@ -241,9 +274,9 @@ func init() {
 	defPredeclaredFuncs()
 
 	universeIota = Universe.Lookup("iota")
+	universeBool = Universe.Lookup("bool").Type()
 	universeByte = Universe.Lookup("byte").Type()
 	universeRune = Universe.Lookup("rune").Type()
-	universeAny = Universe.Lookup("any")
 	universeError = Universe.Lookup("error").Type()
 	universeComparable = Universe.Lookup("comparable")
 }
@@ -252,13 +285,13 @@ func init() {
 // a scope. Objects with exported names are inserted in the unsafe package
 // scope; other objects are inserted in the universe scope.
 func def(obj Object) {
-	assert(obj.color() == black)
+	assert(obj.Type() != nil)
 	name := obj.Name()
 	if strings.Contains(name, " ") {
 		return // nothing to do
 	}
 	// fix Obj link for named types
-	if typ, _ := obj.Type().(*Named); typ != nil {
+	if typ := asNamed(obj.Type()); typ != nil {
 		typ.obj = obj.(*TypeName)
 	}
 	// exported identifiers go into package unsafe
@@ -272,7 +305,7 @@ func def(obj Object) {
 		case *Builtin:
 			obj.pkg = Unsafe
 		default:
-			unreachable()
+			panic("unreachable")
 		}
 	}
 	if scope.Insert(obj) != nil {

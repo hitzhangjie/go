@@ -12,12 +12,14 @@ import (
 	"fmt"
 	"go/format"
 	"log"
+	"math/bits"
 	"os"
 	"path"
 	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ type arch struct {
 	name               string
 	pkg                string // obj package to import for this arch.
 	genfile            string // source file containing opcode code generation.
+	genSIMDfile        string // source file containing opcode code generation for SIMD.
 	ops                []opData
 	blocks             []blockData
 	regnames           []string
@@ -58,6 +61,7 @@ type opData struct {
 	resultInArg0      bool   // (first, if a tuple) output of v and v.Args[0] must be allocated to the same register
 	resultNotInArgs   bool   // outputs must not be allocated to the same registers as inputs
 	clobberFlags      bool   // this op clobbers flags register
+	needIntTemp       bool   // need a temporary free integer register
 	call              bool   // is a function call
 	tailCall          bool   // is a tail call
 	nilCheck          bool   // this op is a nil check on arg0
@@ -66,6 +70,7 @@ type opData struct {
 	hasSideEffects    bool   // for "reasons", not to be eliminated.  E.g., atomic store, #19182.
 	zeroWidth         bool   // op never translates into any machine code. example: copy, which may sometimes translate to machine code, is not zero-width.
 	unsafePoint       bool   // this op is an unsafe point, i.e. not safe for async preemption
+	fixedReg          bool   // this op will be assigned a fixed register
 	symEffect         string // effect this op has on symbol in aux
 	scale             uint8  // amd64/386 indexed load scale
 }
@@ -83,6 +88,10 @@ type regInfo struct {
 	// clobbers encodes the set of registers that are overwritten by
 	// the instruction (other than the output registers).
 	clobbers regMask
+	// Instruction clobbers the register containing input 0.
+	clobbersArg0 bool
+	// Instruction clobbers the register containing input 1.
+	clobbersArg1 bool
 	// outputs[i] encodes the set of registers allowed for the i'th output.
 	outputs []regMask
 }
@@ -109,6 +118,7 @@ var archs []arch
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
 var tracefile = flag.String("trace", "", "write trace to `file`")
+var outDir = flag.String("outdir", "..", "directory in which to write generated files")
 
 func main() {
 	flag.Parse()
@@ -140,7 +150,16 @@ func main() {
 		defer trace.Stop()
 	}
 
-	sort.Sort(ArchsByName(archs))
+	if *outDir != ".." {
+		err := os.MkdirAll(*outDir, 0755)
+		if err != nil {
+			log.Fatalf("failed to create output directory: %v", err)
+		}
+	}
+
+	slices.SortFunc(archs, func(a, b arch) int {
+		return strings.Compare(a.name, b.name)
+	})
 
 	// The generate tasks are run concurrently, since they are CPU-intensive
 	// that can easily make use of many cores on a machine.
@@ -153,6 +172,7 @@ func main() {
 
 	tasks := []func(){
 		genOp,
+		genAllocators,
 	}
 	for _, a := range archs {
 		a := a // the funcs are ran concurrently at a later time
@@ -186,9 +206,13 @@ func main() {
 	}
 }
 
+func outFile(file string) string {
+	return *outDir + "/" + file
+}
+
 func genOp() {
 	w := new(bytes.Buffer)
-	fmt.Fprintf(w, "// Code generated from gen/*Ops.go; DO NOT EDIT.\n")
+	fmt.Fprintf(w, "// Code generated from _gen/*Ops.go using 'go generate'; DO NOT EDIT.\n")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "package ssa")
 
@@ -274,7 +298,7 @@ func genOp() {
 			fmt.Fprintf(w, "argLen: %d,\n", v.argLength)
 
 			if v.rematerializeable {
-				if v.reg.clobbers != 0 {
+				if v.reg.clobbers != 0 || v.reg.clobbersArg0 || v.reg.clobbersArg1 {
 					log.Fatalf("%s is rematerializeable and clobbers registers", v.name)
 				}
 				if v.clobberFlags {
@@ -301,6 +325,9 @@ func genOp() {
 			}
 			if v.clobberFlags {
 				fmt.Fprintln(w, "clobberFlags: true,")
+			}
+			if v.needIntTemp {
+				fmt.Fprintln(w, "needIntTemp: true,")
 			}
 			if v.call {
 				fmt.Fprintln(w, "call: true,")
@@ -329,6 +356,9 @@ func genOp() {
 			if v.zeroWidth {
 				fmt.Fprintln(w, "zeroWidth: true,")
 			}
+			if v.fixedReg {
+				fmt.Fprintln(w, "fixedReg: true,")
+			}
 			if v.unsafePoint {
 				fmt.Fprintln(w, "unsafePoint: true,")
 			}
@@ -337,7 +367,7 @@ func genOp() {
 				if !needEffect {
 					log.Fatalf("symEffect with aux %s not allowed", v.aux)
 				}
-				fmt.Fprintf(w, "symEffect: Sym%s,\n", strings.Replace(v.symEffect, ",", "|Sym", -1))
+				fmt.Fprintf(w, "symEffect: Sym%s,\n", strings.ReplaceAll(v.symEffect, ",", "|Sym"))
 			} else if needEffect {
 				log.Fatalf("symEffect needed for aux %s", v.aux)
 			}
@@ -376,6 +406,12 @@ func genOp() {
 
 			if v.reg.clobbers > 0 {
 				fmt.Fprintf(w, "clobbers: %d,%s\n", v.reg.clobbers, a.regMaskComment(v.reg.clobbers))
+			}
+			if v.reg.clobbersArg0 {
+				fmt.Fprintf(w, "clobbersArg0: true,\n")
+			}
+			if v.reg.clobbersArg1 {
+				fmt.Fprintf(w, "clobbersArg1: true,\n")
 			}
 
 			// reg outputs
@@ -417,7 +453,6 @@ func genOp() {
 			continue
 		}
 		fmt.Fprintf(w, "var registers%s = [...]Register {\n", a.name)
-		var gcRegN int
 		num := map[string]int8{}
 		for i, r := range a.regnames {
 			num[r] = int8(i)
@@ -431,17 +466,12 @@ func genOp() {
 				objname = pkg + ".REGSP"
 			case "g":
 				objname = pkg + ".REGG"
+			case "ZERO":
+				objname = pkg + ".REGZERO"
 			default:
 				objname = pkg + ".REG_" + r
 			}
-			// Assign a GC register map index to registers
-			// that may contain pointers.
-			gcRegIdx := -1
-			if a.gpregmask&(1<<uint(i)) != 0 {
-				gcRegIdx = gcRegN
-				gcRegN++
-			}
-			fmt.Fprintf(w, "  {%d, %s, %d, \"%s\"},\n", i, objname, gcRegIdx, r)
+			fmt.Fprintf(w, "  {%d, %s, \"%s\"},\n", i, objname, r)
 		}
 		parameterRegisterList := func(paramNamesString string) []int8 {
 			paramNamesString = strings.TrimSpace(paramNamesString)
@@ -468,10 +498,6 @@ func genOp() {
 		paramIntRegs := parameterRegisterList(a.ParamIntRegNames)
 		paramFloatRegs := parameterRegisterList(a.ParamFloatRegNames)
 
-		if gcRegN > 32 {
-			// Won't fit in a uint32 mask.
-			log.Fatalf("too many GC registers (%d > 32) on %s", gcRegN, a.name)
-		}
 		fmt.Fprintln(w, "}")
 		fmt.Fprintf(w, "var paramIntReg%s = %#v\n", a.name, paramIntRegs)
 		fmt.Fprintf(w, "var paramFloatReg%s = %#v\n", a.name, paramFloatRegs)
@@ -497,7 +523,7 @@ func genOp() {
 		panic(err)
 	}
 
-	if err := os.WriteFile("../opGen.go", b, 0666); err != nil {
+	if err := os.WriteFile(outFile("opGen.go"), b, 0666); err != nil {
 		log.Fatalf("can't write output: %v\n", err)
 	}
 
@@ -522,6 +548,15 @@ func genOp() {
 		if err != nil {
 			log.Fatalf("can't read %s: %v", a.genfile, err)
 		}
+		// Append the file of simd operations, too
+		if a.genSIMDfile != "" {
+			simdSrc, err := os.ReadFile(a.genSIMDfile)
+			if err != nil {
+				log.Fatalf("can't read %s: %v", a.genSIMDfile, err)
+			}
+			src = append(src, simdSrc...)
+		}
+
 		seen := make(map[string]bool, len(a.ops))
 		for _, m := range rxOp.FindAllSubmatch(src, -1) {
 			seen[string(m[1])] = true
@@ -545,12 +580,7 @@ func (a arch) Name() string {
 
 // countRegs returns the number of set bits in the register mask.
 func countRegs(r regMask) int {
-	n := 0
-	for r != 0 {
-		n += int(r & 1)
-		r >>= 1
-	}
-	return n
+	return bits.OnesCount64(uint64(r))
 }
 
 // for sorting a pair of integers by key
@@ -562,9 +592,3 @@ type byKey []intPair
 func (a byKey) Len() int           { return len(a) }
 func (a byKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a byKey) Less(i, j int) bool { return a[i].key < a[j].key }
-
-type ArchsByName []arch
-
-func (x ArchsByName) Len() int           { return len(x) }
-func (x ArchsByName) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
-func (x ArchsByName) Less(i, j int) bool { return x[i].name < x[j].name }

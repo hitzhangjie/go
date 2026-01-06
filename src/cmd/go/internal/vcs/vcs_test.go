@@ -215,17 +215,13 @@ func TestRepoRootForImportPath(t *testing.T) {
 // Test that vcs.FromDir correctly inspects a given directory and returns the
 // right VCS and repo directory.
 func TestFromDir(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "vcstest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
-	for j, vcs := range vcsList {
-		for r, rootName := range vcs.RootNames {
+	for _, vcs := range vcsList {
+		for r, root := range vcs.RootNames {
 			vcsName := fmt.Sprint(vcs.Name, r)
-			dir := filepath.Join(tempDir, "example.com", vcsName, rootName)
-			if j&1 == 0 {
+			dir := filepath.Join(tempDir, "example.com", vcsName, root.filename)
+			if root.isDir {
 				err := os.MkdirAll(dir, 0755)
 				if err != nil {
 					t.Fatal(err)
@@ -243,7 +239,7 @@ func TestFromDir(t *testing.T) {
 			}
 
 			wantRepoDir := filepath.Dir(dir)
-			gotRepoDir, gotVCS, err := FromDir(dir, tempDir, false)
+			gotRepoDir, gotVCS, err := FromDir(dir, tempDir)
 			if err != nil {
 				t.Errorf("FromDir(%q, %q): %v", dir, tempDir, err)
 				continue
@@ -428,6 +424,28 @@ func TestMatchGoImport(t *testing.T) {
 			},
 			path: "myitcv.io/other",
 			mi:   metaImport{Prefix: "myitcv.io", VCS: "git", RepoRoot: "https://github.com/myitcv/x"},
+		},
+		{
+			imports: []metaImport{
+				{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: "subdir"},
+			},
+			path: "example.com/user/foo",
+			mi:   metaImport{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: "subdir"},
+		},
+		{
+			imports: []metaImport{
+				{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: "foo/subdir"},
+			},
+			path: "example.com/user/foo",
+			mi:   metaImport{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: "foo/subdir"},
+		},
+		{
+			imports: []metaImport{
+				{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: "subdir"},
+				{Prefix: "example.com/user/foo", VCS: "git", RepoRoot: "https://example.com/repo/target", SubDir: ""},
+			},
+			path: "example.com/user/foo",
+			err:  errors.New("multiple meta tags match import path"),
 		},
 	}
 

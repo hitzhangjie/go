@@ -7,15 +7,11 @@ package runtime
 import (
 	"internal/cpu"
 	"internal/goexperiment"
-	"runtime/internal/atomic"
-	_ "unsafe" // for go:linkname
+	"internal/runtime/atomic"
+	"internal/runtime/math"
+	"internal/strconv"
+	_ "unsafe"
 )
-
-// go119MemoryLimitSupport is a feature flag for a number of changes
-// related to the memory limit feature (#48409). Disabling this flag
-// disables those features, as well as the memory limit mechanism,
-// which becomes a no-op.
-const go119MemoryLimitSupport = true
 
 const (
 	// gcGoalUtilization is the goal CPU utilization for
@@ -67,11 +63,16 @@ const (
 	// that can accumulate on a P before updating gcController.stackSize.
 	maxStackScanSlack = 8 << 10
 
-	// memoryLimitHeapGoalHeadroom is the amount of headroom the pacer gives to
-	// the heap goal when operating in the memory-limited regime. That is,
-	// it'll reduce the heap goal by this many extra bytes off of the base
-	// calculation.
-	memoryLimitHeapGoalHeadroom = 1 << 20
+	// memoryLimitMinHeapGoalHeadroom is the minimum amount of headroom the
+	// pacer gives to the heap goal when operating in the memory-limited regime.
+	// That is, it'll reduce the heap goal by this many extra bytes off of the
+	// base calculation, at minimum.
+	memoryLimitMinHeapGoalHeadroom = 1 << 20
+
+	// memoryLimitHeapGoalHeadroomPercent is how headroom the memory-limit-based
+	// heap goal should have as a percent of the maximum possible heap goal allowed
+	// to maintain the memory limit.
+	memoryLimitHeapGoalHeadroomPercent = 3
 )
 
 // gcController implements the GC pacing controller that determines
@@ -136,12 +137,10 @@ type gcControllerState struct {
 	// Updated at the end of each GC cycle, in endCycle.
 	consMark float64
 
-	// consMarkController holds the state for the mark-cons ratio
-	// estimation over time.
-	//
-	// Its purpose is to smooth out noisiness in the computation of
-	// consMark; see consMark for details.
-	consMarkController piController
+	// lastConsMark is the computed cons/mark value for the previous 4 GC
+	// cycles. Note that this is *not* the last value of consMark, but the
+	// measured cons/mark value in endCycle.
+	lastConsMark [4]float64
 
 	// gcPercentHeapGoal is the goal heapLive for when next GC ends derived
 	// from gcPercent.
@@ -372,28 +371,6 @@ type gcControllerState struct {
 func (c *gcControllerState) init(gcPercent int32, memoryLimit int64) {
 	c.heapMinimum = defaultHeapMinimum
 	c.triggered = ^uint64(0)
-
-	c.consMarkController = piController{
-		// Tuned first via the Ziegler-Nichols process in simulation,
-		// then the integral time was manually tuned against real-world
-		// applications to deal with noisiness in the measured cons/mark
-		// ratio.
-		kp: 0.9,
-		ti: 4.0,
-
-		// Set a high reset time in GC cycles.
-		// This is inversely proportional to the rate at which we
-		// accumulate error from clipping. By making this very high
-		// we make the accumulation slow. In general, clipping is
-		// OK in our situation, hence the choice.
-		//
-		// Tune this if we get unintended effects from clipping for
-		// a long time.
-		tt:  1000,
-		min: -1000,
-		max: 1000,
-	}
-
 	c.setGCPercent(gcPercent)
 	c.setMemoryLimit(memoryLimit)
 	c.commit(true) // No sweep phase in the first GC cycle.
@@ -416,26 +393,7 @@ func (c *gcControllerState) startCycle(markStartTime int64, procs int, trigger g
 	c.fractionalMarkTime.Store(0)
 	c.idleMarkTime.Store(0)
 	c.markStartTime = markStartTime
-
-	// TODO(mknyszek): This is supposed to be the actual trigger point for the heap, but
-	// causes regressions in memory use. The cause is that the PI controller used to smooth
-	// the cons/mark ratio measurements tends to flail when using the less accurate precomputed
-	// trigger for the cons/mark calculation, and this results in the controller being more
-	// conservative about steady-states it tries to find in the future.
-	//
-	// This conservatism is transient, but these transient states tend to matter for short-lived
-	// programs, especially because the PI controller is overdamped, partially because it is
-	// configured with a relatively large time constant.
-	//
-	// Ultimately, I think this is just two mistakes piled on one another: the choice of a swingy
-	// smoothing function that recalls a fairly long history (due to its overdamped time constant)
-	// coupled with an inaccurate cons/mark calculation. It just so happens this works better
-	// today, and it makes it harder to change things in the future.
-	//
-	// This is described in #53738. Fix this for #53892 by changing back to the actual trigger
-	// point and simplifying the smoothing function.
-	heapTrigger, heapGoal := c.trigger()
-	c.triggered = heapTrigger
+	c.triggered = c.heapLive.Load()
 
 	// Compute the background mark utilization goal. In general,
 	// this may not come out exactly. We round the number of
@@ -469,7 +427,7 @@ func (c *gcControllerState) startCycle(markStartTime int64, procs int, trigger g
 	// Clear per-P state
 	for _, p := range allp {
 		p.gcAssistTime = 0
-		p.gcFractionalMarkTime = 0
+		p.gcFractionalMarkTime.Store(0)
 	}
 
 	if trigger.kind == gcTriggerTime {
@@ -498,6 +456,7 @@ func (c *gcControllerState) startCycle(markStartTime int64, procs int, trigger g
 	c.revise()
 
 	if debug.gcpacertrace > 0 {
+		heapGoal := c.heapGoal()
 		assistRatio := c.assistWorkPerByte.Load()
 		print("pacer: assist ratio=", assistRatio,
 			" (scan ", gcController.heapScan.Load()>>20, " MB in ",
@@ -693,38 +652,26 @@ func (c *gcControllerState) endCycle(now int64, procs int, userForced bool) {
 	//
 	// So this calculation is really:
 	//     (heapLive-trigger) / (assistDuration * procs * (1-utilization)) /
-	//         (scanWork) / (assistDuration * procs * (utilization+idleUtilization)
+	//         (scanWork) / (assistDuration * procs * (utilization+idleUtilization))
 	//
 	// Note that because we only care about the ratio, assistDuration and procs cancel out.
 	scanWork := c.heapScanWork.Load() + c.stackScanWork.Load() + c.globalsScanWork.Load()
 	currentConsMark := (float64(c.heapLive.Load()-c.triggered) * (utilization + idleUtilization)) /
 		(float64(scanWork) * (1 - utilization))
 
-	// Update cons/mark controller. The time period for this is 1 GC cycle.
-	//
-	// This use of a PI controller might seem strange. So, here's an explanation:
-	//
-	// currentConsMark represents the consMark we *should've* had to be perfectly
-	// on-target for this cycle. Given that we assume the next GC will be like this
-	// one in the steady-state, it stands to reason that we should just pick that
-	// as our next consMark. In practice, however, currentConsMark is too noisy:
-	// we're going to be wildly off-target in each GC cycle if we do that.
-	//
-	// What we do instead is make a long-term assumption: there is some steady-state
-	// consMark value, but it's obscured by noise. By constantly shooting for this
-	// noisy-but-perfect consMark value, the controller will bounce around a bit,
-	// but its average behavior, in aggregate, should be less noisy and closer to
-	// the true long-term consMark value, provided its tuned to be slightly overdamped.
-	var ok bool
+	// Update our cons/mark estimate. This is the maximum of the value we just computed and the last
+	// 4 cons/mark values we measured. The reason we take the maximum here is to bias a noisy
+	// cons/mark measurement toward fewer assists at the expense of additional GC cycles (starting
+	// earlier).
 	oldConsMark := c.consMark
-	c.consMark, ok = c.consMarkController.next(c.consMark, currentConsMark, 1.0)
-	if !ok {
-		// The error spiraled out of control. This is incredibly unlikely seeing
-		// as this controller is essentially just a smoothing function, but it might
-		// mean that something went very wrong with how currentConsMark was calculated.
-		// Just reset consMark and keep going.
-		c.consMark = 0
+	c.consMark = currentConsMark
+	for i := range c.lastConsMark {
+		if c.lastConsMark[i] > c.consMark {
+			c.consMark = c.lastConsMark[i]
+		}
 	}
+	copy(c.lastConsMark[:], c.lastConsMark[1:])
+	c.lastConsMark[len(c.lastConsMark)-1] = currentConsMark
 
 	if debug.gcpacertrace > 0 {
 		printlock()
@@ -733,9 +680,6 @@ func (c *gcControllerState) endCycle(now int64, procs int, userForced bool) {
 		print(c.heapScanWork.Load(), "+", c.stackScanWork.Load(), "+", c.globalsScanWork.Load(), " B work (", c.lastHeapScan+c.lastStackScan.Load()+c.globalsScan.Load(), " B exp.) ")
 		live := c.heapLive.Load()
 		print("in ", c.triggered, " B -> ", live, " B (∆goal ", int64(live)-int64(c.lastHeapGoal), ", cons/mark ", oldConsMark, ")")
-		if !ok {
-			print("[controller reset]")
-		}
 		println()
 		printunlock()
 	}
@@ -745,21 +689,42 @@ func (c *gcControllerState) endCycle(now int64, procs int, userForced bool) {
 // another P if there are spare worker slots. It is used by putfull
 // when more work is made available.
 //
+// If goexperiment.GreenTeaGC, the caller must not hold a G's scan bit,
+// otherwise this could cause a deadlock. This is already enforced by
+// the static lock ranking.
+//
 //go:nowritebarrier
 func (c *gcControllerState) enlistWorker() {
-	// If there are idle Ps, wake one so it will run an idle worker.
-	// NOTE: This is suspected of causing deadlocks. See golang.org/issue/19112.
-	//
-	//	if sched.npidle.Load() != 0 && sched.nmspinning.Load() == 0 {
-	//		wakep()
-	//		return
-	//	}
+	needDedicated := c.dedicatedMarkWorkersNeeded.Load() > 0
 
-	// There are no idle Ps. If we need more dedicated workers,
-	// try to preempt a running P so it will switch to a worker.
-	if c.dedicatedMarkWorkersNeeded.Load() <= 0 {
+	// Create new workers from idle Ps with goexperiment.GreenTeaGC.
+	//
+	// Note: with Green Tea, this places a requirement on enlistWorker
+	// that it must not be called while a G's scan bit is held.
+	if goexperiment.GreenTeaGC {
+		needIdle := c.needIdleMarkWorker()
+
+		// If we're all full on dedicated and idle workers, nothing
+		// to do.
+		if !needDedicated && !needIdle {
+			return
+		}
+
+		// If there are idle Ps, wake one so it will run a worker
+		// (the scheduler will already prefer to spin up a new
+		// dedicated worker over an idle one).
+		if sched.npidle.Load() != 0 && sched.nmspinning.Load() == 0 {
+			wakep() // Likely to consume our worker request.
+			return
+		}
+	}
+
+	// If we still need more dedicated workers, try to preempt a running P
+	// so it will switch to a worker.
+	if !needDedicated {
 		return
 	}
+
 	// Pick a random other P to preempt.
 	if gomaxprocs <= 1 {
 		return
@@ -770,7 +735,7 @@ func (c *gcControllerState) enlistWorker() {
 	}
 	myID := gp.m.p.ptr().id
 	for tries := 0; tries < 5; tries++ {
-		id := int32(fastrandn(uint32(gomaxprocs - 1)))
+		id := int32(cheaprandn(uint32(gomaxprocs - 1)))
 		if id >= myID {
 			id++
 		}
@@ -784,30 +749,44 @@ func (c *gcControllerState) enlistWorker() {
 	}
 }
 
-// findRunnableGCWorker returns a background mark worker for pp if it
-// should be run. This must only be called when gcBlackenEnabled != 0.
-func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
+// assignWaitingGCWorker assigns a background mark worker to pp if one should
+// be run.
+//
+// If a worker is selected, it is assigned to pp.nextMarkGCWorker and the P is
+// wired as a GC mark worker. The G is still in _Gwaiting. If no worker is
+// selected, ok returns false.
+//
+// If assignedWaitingGCWorker returns true, this P must either:
+// - Mark the G as runnable and run it, clearing pp.nextMarkGCWorker.
+// - Or, call c.releaseNextGCMarkWorker.
+//
+// This must only be called when gcBlackenEnabled != 0.
+func (c *gcControllerState) assignWaitingGCWorker(pp *p, now int64) (bool, int64) {
 	if gcBlackenEnabled == 0 {
 		throw("gcControllerState.findRunnable: blackening not enabled")
 	}
 
-	// Since we have the current time, check if the GC CPU limiter
-	// hasn't had an update in a while. This check is necessary in
-	// case the limiter is on but hasn't been checked in a while and
-	// so may have left sufficient headroom to turn off again.
 	if now == 0 {
 		now = nanotime()
 	}
-	if gcCPULimiter.needUpdate(now) {
-		gcCPULimiter.update(now)
-	}
 
-	if !gcMarkWorkAvailable(pp) {
-		// No work to be done right now. This can happen at
+	if !gcShouldScheduleWorker(pp) {
+		// No good reason to schedule a worker. This can happen at
 		// the end of the mark phase when there are still
 		// assists tapering off. Don't bother running a worker
 		// now because it'll just return immediately.
-		return nil, now
+		return false, now
+	}
+
+	if c.dedicatedMarkWorkersNeeded.Load() <= 0 && c.fractionalUtilizationGoal == 0 {
+		// No current need for dedicated workers, and no need at all for
+		// fractional workers. Check before trying to acquire a worker; when
+		// GOMAXPROCS is large, that can be expensive and is often unnecessary.
+		//
+		// When a dedicated worker stops running, the gcBgMarkWorker loop notes
+		// the need for the worker before returning it to the pool. If we don't
+		// see the need now, we wouldn't have found it in the pool anyway.
+		return false, now
 	}
 
 	// Grab a worker before we commit to running below.
@@ -824,7 +803,7 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 		// it will always do so with queued global work. Thus, that P
 		// will be immediately eligible to re-run the worker G it was
 		// just using, ensuring work can complete.
-		return nil, now
+		return false, now
 	}
 
 	decIfPositive := func(val *atomic.Int64) bool {
@@ -847,29 +826,87 @@ func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
 	} else if c.fractionalUtilizationGoal == 0 {
 		// No need for fractional workers.
 		gcBgMarkWorkerPool.push(&node.node)
-		return nil, now
+		return false, now
 	} else {
 		// Is this P behind on the fractional utilization
 		// goal?
 		//
 		// This should be kept in sync with pollFractionalWorkerExit.
 		delta := now - c.markStartTime
-		if delta > 0 && float64(pp.gcFractionalMarkTime)/float64(delta) > c.fractionalUtilizationGoal {
+		if delta > 0 && float64(pp.gcFractionalMarkTime.Load())/float64(delta) > c.fractionalUtilizationGoal {
 			// Nope. No need to run a fractional worker.
 			gcBgMarkWorkerPool.push(&node.node)
-			return nil, now
+			return false, now
 		}
 		// Run a fractional worker.
 		pp.gcMarkWorkerMode = gcMarkWorkerFractionalMode
 	}
 
+	pp.nextGCMarkWorker = node
+	return true, now
+}
+
+// findRunnableGCWorker returns a background mark worker for pp if it
+// should be run.
+//
+// If findRunnableGCWorker returns a G, this P is wired as a GC mark worker and
+// must run the G.
+//
+// This must only be called when gcBlackenEnabled != 0.
+//
+// This function is allowed to have write barriers because it is called from
+// the portion of findRunnable that always has a P.
+//
+//go:yeswritebarrierrec
+func (c *gcControllerState) findRunnableGCWorker(pp *p, now int64) (*g, int64) {
+	// Since we have the current time, check if the GC CPU limiter
+	// hasn't had an update in a while. This check is necessary in
+	// case the limiter is on but hasn't been checked in a while and
+	// so may have left sufficient headroom to turn off again.
+	if now == 0 {
+		now = nanotime()
+	}
+	if gcCPULimiter.needUpdate(now) {
+		gcCPULimiter.update(now)
+	}
+
+	// If a worker wasn't already assigned by procresize, assign one now.
+	if pp.nextGCMarkWorker == nil {
+		ok, now := c.assignWaitingGCWorker(pp, now)
+		if !ok {
+			return nil, now
+		}
+	}
+
+	node := pp.nextGCMarkWorker
+	pp.nextGCMarkWorker = nil
+
 	// Run the background mark worker.
 	gp := node.gp.ptr()
+	trace := traceAcquire()
 	casgstatus(gp, _Gwaiting, _Grunnable)
-	if trace.enabled {
-		traceGoUnpark(gp, 0)
+	if trace.ok() {
+		trace.GoUnpark(gp, 0)
+		traceRelease(trace)
 	}
 	return gp, now
+}
+
+// Release an unused pp.nextGCMarkWorker, if any.
+//
+// This function is allowed to have write barriers because it is called from
+// the portion of schedule.
+//
+//go:yeswritebarrierrec
+func (c *gcControllerState) releaseNextGCMarkWorker(pp *p) {
+	node := pp.nextGCMarkWorker
+	if node == nil {
+		return
+	}
+
+	c.markWorkerStop(pp.gcMarkWorkerMode, 0)
+	gcBgMarkWorkerPool.push(&node.node)
+	pp.nextGCMarkWorker = nil
 }
 
 // resetLive sets up the controller state for the next mark phase after the end
@@ -886,8 +923,10 @@ func (c *gcControllerState) resetLive(bytesMarked uint64) {
 	c.triggered = ^uint64(0) // Reset triggered.
 
 	// heapLive was updated, so emit a trace event.
-	if trace.enabled {
-		traceHeapAlloc(bytesMarked)
+	trace := traceAcquire()
+	if trace.ok() {
+		trace.HeapAlloc(bytesMarked)
+		traceRelease(trace)
 	}
 }
 
@@ -914,10 +953,12 @@ func (c *gcControllerState) markWorkerStop(mode gcMarkWorkerMode, duration int64
 
 func (c *gcControllerState) update(dHeapLive, dHeapScan int64) {
 	if dHeapLive != 0 {
+		trace := traceAcquire()
 		live := gcController.heapLive.Add(dHeapLive)
-		if trace.enabled {
+		if trace.ok() {
 			// gcController.heapLive changed.
-			traceHeapAlloc(live)
+			trace.HeapAlloc(live)
+			traceRelease(trace)
 		}
 	}
 	if gcBlackenEnabled == 0 {
@@ -963,7 +1004,7 @@ func (c *gcControllerState) heapGoalInternal() (goal, minTrigger uint64) {
 	goal = c.gcPercentHeapGoal.Load()
 
 	// Check if the memory-limit-based goal is smaller, and if so, pick that.
-	if newGoal := c.memoryLimitHeapGoal(); go119MemoryLimitSupport && newGoal < goal {
+	if newGoal := c.memoryLimitHeapGoal(); newGoal < goal {
 		goal = newGoal
 	} else {
 		// We're not limited by the memory limit goal, so perform a series of
@@ -1031,8 +1072,10 @@ func (c *gcControllerState) memoryLimitHeapGoal() uint64 {
 	//
 	// In practice this computation looks like the following:
 	//
-	//    memoryLimit - ((mappedReady - heapFree - heapAlloc) + max(mappedReady - memoryLimit, 0)) - memoryLimitHeapGoalHeadroom
-	//                    ^1                                    ^2                                   ^3
+	//    goal := memoryLimit - ((mappedReady - heapFree - heapAlloc) + max(mappedReady - memoryLimit, 0))
+	//                    ^1                                    ^2
+	//    goal -= goal / 100 * memoryLimitHeapGoalHeadroomPercent
+	//    ^3
 	//
 	// Let's break this down.
 	//
@@ -1064,11 +1107,14 @@ func (c *gcControllerState) memoryLimitHeapGoal() uint64 {
 	// terms of heap objects, but it takes more than X bytes (e.g. due to fragmentation) to store
 	// X bytes worth of objects.
 	//
-	// The third term (marker 3) subtracts an additional memoryLimitHeapGoalHeadroom bytes from the
-	// heap goal. As the name implies, this is to provide additional headroom in the face of pacing
-	// inaccuracies. This is a fixed number of bytes because these inaccuracies disproportionately
-	// affect small heaps: as heaps get smaller, the pacer's inputs get fuzzier. Shorter GC cycles
-	// and less GC work means noisy external factors like the OS scheduler have a greater impact.
+	// The final adjustment (marker 3) reduces the maximum possible memory limit heap goal by
+	// memoryLimitHeapGoalPercent. As the name implies, this is to provide additional headroom in
+	// the face of pacing inaccuracies, and also to leave a buffer of unscavenged memory so the
+	// allocator isn't constantly scavenging. The reduction amount also has a fixed minimum
+	// (memoryLimitMinHeapGoalHeadroom, not pictured) because the aforementioned pacing inaccuracies
+	// disproportionately affect small heaps: as heaps get smaller, the pacer's inputs get fuzzier.
+	// Shorter GC cycles and less GC work means noisy external factors like the OS scheduler have a
+	// greater impact.
 
 	memoryLimit := uint64(c.memoryLimit.Load())
 
@@ -1092,12 +1138,19 @@ func (c *gcControllerState) memoryLimitHeapGoal() uint64 {
 	// Compute the goal.
 	goal := memoryLimit - (nonHeapMemory + overage)
 
-	// Apply some headroom to the goal to account for pacing inaccuracies.
-	// Be careful about small limits.
-	if goal < memoryLimitHeapGoalHeadroom || goal-memoryLimitHeapGoalHeadroom < memoryLimitHeapGoalHeadroom {
-		goal = memoryLimitHeapGoalHeadroom
+	// Apply some headroom to the goal to account for pacing inaccuracies and to reduce
+	// the impact of scavenging at allocation time in response to a high allocation rate
+	// when GOGC=off. See issue #57069. Also, be careful about small limits.
+	headroom := goal / 100 * memoryLimitHeapGoalHeadroomPercent
+	if headroom < memoryLimitMinHeapGoalHeadroom {
+		// Set a fixed minimum to deal with the particularly large effect pacing inaccuracies
+		// have for smaller heaps.
+		headroom = memoryLimitMinHeapGoalHeadroom
+	}
+	if goal < headroom || goal-headroom < headroom {
+		goal = headroom
 	} else {
-		goal = goal - memoryLimitHeapGoalHeadroom
+		goal = goal - headroom
 	}
 	// Don't let us go below the live heap. A heap goal below the live heap doesn't make sense.
 	if goal < c.heapMarked {
@@ -1165,7 +1218,7 @@ func (c *gcControllerState) trigger() (uint64, uint64) {
 	// increase in RSS. By capping us at a point >0, we're essentially
 	// saying that we're OK using more CPU during the GC to prevent
 	// this growth in RSS.
-	triggerLowerBound := uint64(((goal-c.heapMarked)/triggerRatioDen)*minTriggerRatioNum) + c.heapMarked
+	triggerLowerBound := ((goal-c.heapMarked)/triggerRatioDen)*minTriggerRatioNum + c.heapMarked
 	if minTrigger < triggerLowerBound {
 		minTrigger = triggerLowerBound
 	}
@@ -1179,13 +1232,11 @@ func (c *gcControllerState) trigger() (uint64, uint64) {
 	// to reflect the costs of a GC with no work to do. With a large heap but
 	// very little scan work to perform, this gives us exactly as much runway
 	// as we would need, in the worst case.
-	maxTrigger := uint64(((goal-c.heapMarked)/triggerRatioDen)*maxTriggerRatioNum) + c.heapMarked
+	maxTrigger := ((goal-c.heapMarked)/triggerRatioDen)*maxTriggerRatioNum + c.heapMarked
 	if goal > defaultHeapMinimum && goal-defaultHeapMinimum > maxTrigger {
 		maxTrigger = goal - defaultHeapMinimum
 	}
-	if maxTrigger < minTrigger {
-		maxTrigger = minTrigger
-	}
+	maxTrigger = max(maxTrigger, minTrigger)
 
 	// Compute the trigger from our bounds and the runway stored by commit.
 	var trigger uint64
@@ -1195,12 +1246,8 @@ func (c *gcControllerState) trigger() (uint64, uint64) {
 	} else {
 		trigger = goal - runway
 	}
-	if trigger < minTrigger {
-		trigger = minTrigger
-	}
-	if trigger > maxTrigger {
-		trigger = maxTrigger
-	}
+	trigger = max(trigger, minTrigger)
+	trigger = min(trigger, maxTrigger)
 	if trigger > goal {
 		print("trigger=", trigger, " heapGoal=", goal, "\n")
 		print("minTrigger=", minTrigger, " maxTrigger=", maxTrigger, "\n")
@@ -1325,8 +1372,8 @@ func readGOGC() int32 {
 	if p == "off" {
 		return -1
 	}
-	if n, ok := atoi32(p); ok {
-		return n
+	if n, err := strconv.ParseInt(p, 10, 32); err == nil {
+		return int32(n)
 	}
 	return 100
 }
@@ -1369,7 +1416,7 @@ func setMemoryLimit(in int64) (out int64) {
 func readGOMEMLIMIT() int64 {
 	p := gogetenv("GOMEMLIMIT")
 	if p == "" || p == "off" {
-		return maxInt64
+		return math.MaxInt64
 	}
 	n, ok := parseByteCount(p)
 	if !ok {
@@ -1377,74 +1424,6 @@ func readGOMEMLIMIT() int64 {
 		throw("malformed GOMEMLIMIT; see `go doc runtime/debug.SetMemoryLimit`")
 	}
 	return n
-}
-
-type piController struct {
-	kp float64 // Proportional constant.
-	ti float64 // Integral time constant.
-	tt float64 // Reset time.
-
-	min, max float64 // Output boundaries.
-
-	// PI controller state.
-
-	errIntegral float64 // Integral of the error from t=0 to now.
-
-	// Error flags.
-	errOverflow   bool // Set if errIntegral ever overflowed.
-	inputOverflow bool // Set if an operation with the input overflowed.
-}
-
-// next provides a new sample to the controller.
-//
-// input is the sample, setpoint is the desired point, and period is how much
-// time (in whatever unit makes the most sense) has passed since the last sample.
-//
-// Returns a new value for the variable it's controlling, and whether the operation
-// completed successfully. One reason this might fail is if error has been growing
-// in an unbounded manner, to the point of overflow.
-//
-// In the specific case of an error overflow occurs, the errOverflow field will be
-// set and the rest of the controller's internal state will be fully reset.
-func (c *piController) next(input, setpoint, period float64) (float64, bool) {
-	// Compute the raw output value.
-	prop := c.kp * (setpoint - input)
-	rawOutput := prop + c.errIntegral
-
-	// Clamp rawOutput into output.
-	output := rawOutput
-	if isInf(output) || isNaN(output) {
-		// The input had a large enough magnitude that either it was already
-		// overflowed, or some operation with it overflowed.
-		// Set a flag and reset. That's the safest thing to do.
-		c.reset()
-		c.inputOverflow = true
-		return c.min, false
-	}
-	if output < c.min {
-		output = c.min
-	} else if output > c.max {
-		output = c.max
-	}
-
-	// Update the controller's state.
-	if c.ti != 0 && c.tt != 0 {
-		c.errIntegral += (c.kp*period/c.ti)*(setpoint-input) + (period/c.tt)*(output-rawOutput)
-		if isInf(c.errIntegral) || isNaN(c.errIntegral) {
-			// So much error has accumulated that we managed to overflow.
-			// The assumptions around the controller have likely broken down.
-			// Set a flag and reset. That's the safest thing to do.
-			c.reset()
-			c.errOverflow = true
-			return c.min, false
-		}
-	}
-	return output, true
-}
-
-// reset resets the controller state, except for controller error flags.
-func (c *piController) reset() {
-	c.errIntegral = 0
 }
 
 // addIdleMarkWorker attempts to add a new idle mark worker.
@@ -1491,7 +1470,7 @@ func (c *gcControllerState) needIdleMarkWorker() bool {
 	return n < max
 }
 
-// removeIdleMarkWorker must be called when an new idle mark worker stops executing.
+// removeIdleMarkWorker must be called when a new idle mark worker stops executing.
 func (c *gcControllerState) removeIdleMarkWorker() {
 	for {
 		old := c.idleMarkWorkers.Load()
@@ -1548,8 +1527,10 @@ func gcControllerCommit() {
 
 	// TODO(mknyszek): This isn't really accurate any longer because the heap
 	// goal is computed dynamically. Still useful to snapshot, but not as useful.
-	if trace.enabled {
-		traceHeapGoal()
+	trace := traceAcquire()
+	if trace.ok() {
+		trace.HeapGoal()
+		traceRelease(trace)
 	}
 
 	trigger, heapGoal := gcController.trigger()

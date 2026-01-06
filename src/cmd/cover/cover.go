@@ -6,6 +6,8 @@ package main
 
 import (
 	"bytes"
+	"cmd/internal/cov/covcmd"
+	"cmp"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,15 +18,16 @@ import (
 	"internal/coverage/encodemeta"
 	"internal/coverage/slicewriter"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/internal/edit"
 	"cmd/internal/objabi"
+	"cmd/internal/telemetry/counter"
 )
 
 const usageMessage = "" +
@@ -50,7 +53,7 @@ where -pkgcfg points to a file containing the package path,
 package name, module path, and related info from "go build",
 and -outfilelist points to a file containing the filenames
 of the instrumented output files (one per input file).
-See https://pkg.go.dev/internal/coverage#CoverPkgConfig for
+See https://pkg.go.dev/cmd/internal/cov/covcmd#CoverPkgConfig for
 more on the package config.
 `
 
@@ -63,22 +66,21 @@ func usage() {
 }
 
 var (
-	mode        = flag.String("mode", "", "coverage mode: set, count, atomic")
-	varVar      = flag.String("var", "GoCover", "name of coverage variable to generate")
-	output      = flag.String("o", "", "file for output")
-	outfilelist = flag.String("outfilelist", "", "file containing list of output files (one per line) if -pkgcfg is in use")
-	htmlOut     = flag.String("html", "", "generate HTML representation of coverage profile")
-	funcOut     = flag.String("func", "", "output coverage profile information for each function")
-	pkgcfg      = flag.String("pkgcfg", "", "enable full-package instrumentation mode using params from specified config file")
+	mode             = flag.String("mode", "", "coverage mode: set, count, atomic")
+	varVar           = flag.String("var", "GoCover", "name of coverage variable to generate")
+	output           = flag.String("o", "", "file for output")
+	outfilelist      = flag.String("outfilelist", "", "file containing list of output files (one per line) if -pkgcfg is in use")
+	htmlOut          = flag.String("html", "", "generate HTML representation of coverage profile")
+	funcOut          = flag.String("func", "", "output coverage profile information for each function")
+	pkgcfg           = flag.String("pkgcfg", "", "enable full-package instrumentation mode using params from specified config file")
+	pkgconfig        covcmd.CoverPkgConfig
+	outputfiles      []string // list of *.cover.go instrumented outputs to write, one per input (set when -pkgcfg is in use)
+	profile          string   // The profile to read; the value of -html or -func
+	counterStmt      func(*File, string) string
+	covervarsoutfile string // an additional Go source file into which we'll write definitions of coverage counter variables + meta data variables (set when -pkgcfg is in use).
+	cmode            coverage.CounterMode
+	cgran            coverage.CounterGranularity
 )
-
-var pkgconfig coverage.CoverPkgConfig
-
-var outputfiles []string // set whe -pkgcfg is in use
-
-var profile string // The profile to read; the value of -html or -func
-
-var counterStmt func(*File, string) string
 
 const (
 	atomicPackagePath = "sync/atomic"
@@ -86,9 +88,13 @@ const (
 )
 
 func main() {
+	counter.Open()
+
 	objabi.AddVersionFlag()
 	flag.Usage = usage
-	flag.Parse()
+	objabi.Flagparse(usage)
+	counter.Inc("cover/invocations")
+	counter.CountFlags("cover/flag:", *flag.CommandLine)
 
 	// Usage information when no arguments.
 	if flag.NFlag() == 0 && flag.NArg() == 0 {
@@ -144,12 +150,19 @@ func parseFlags() error {
 		switch *mode {
 		case "set":
 			counterStmt = setCounterStmt
+			cmode = coverage.CtrModeSet
 		case "count":
 			counterStmt = incCounterStmt
+			cmode = coverage.CtrModeCount
 		case "atomic":
 			counterStmt = atomicCounterStmt
-		case "regonly", "testmain":
+			cmode = coverage.CtrModeAtomic
+		case "regonly":
 			counterStmt = nil
+			cmode = coverage.CtrModeRegOnly
+		case "testmain":
+			counterStmt = nil
+			cmode = coverage.CtrModeTestMain
 		default:
 			return fmt.Errorf("unknown -mode %v", *mode)
 		}
@@ -165,6 +178,8 @@ func parseFlags() error {
 				if outputfiles, err = readOutFileList(*outfilelist); err != nil {
 					return err
 				}
+				covervarsoutfile = outputfiles[0]
+				outputfiles = outputfiles[1:]
 				numInputs := len(flag.Args())
 				numOutputs := len(outputfiles)
 				if numOutputs != numInputs {
@@ -190,7 +205,7 @@ func parseFlags() error {
 }
 
 func readOutFileList(path string) ([]string, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("error reading -outfilelist file %q: %v", path, err)
 	}
@@ -198,14 +213,19 @@ func readOutFileList(path string) ([]string, error) {
 }
 
 func readPackageConfig(path string) error {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("error reading pkgconfig file %q: %v", path, err)
 	}
 	if err := json.Unmarshal(data, &pkgconfig); err != nil {
 		return fmt.Errorf("error reading pkgconfig file %q: %v", path, err)
 	}
-	if pkgconfig.Granularity != "perblock" && pkgconfig.Granularity != "perfunc" {
+	switch pkgconfig.Granularity {
+	case "perblock":
+		cgran = coverage.CtrGranularityPerBlock
+	case "perfunc":
+		cgran = coverage.CtrGranularityPerFunc
+	default:
 		return fmt.Errorf(`%s: pkgconfig requires perblock/perfunc value`, path)
 	}
 	return nil
@@ -382,8 +402,23 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 		if n.Name.Name == "_" || n.Body == nil {
 			return nil
 		}
-		// Determine proper function or method name.
 		fname := n.Name.Name
+		// Skip AddUint32 and StoreUint32 if we're instrumenting
+		// sync/atomic itself in atomic mode (out of an abundance of
+		// caution), since as part of the instrumentation process we
+		// add calls to AddUint32/StoreUint32, and we don't want to
+		// somehow create an infinite loop.
+		//
+		// Note that in the current implementation (Go 1.20) both
+		// routines are assembly stubs that forward calls to the
+		// internal/runtime/atomic equivalents, hence the infinite
+		// loop scenario is purely theoretical (maybe if in some
+		// future implementation one of these functions might be
+		// written in Go). See #57445 for more details.
+		if atomicOnAtomic() && (fname == "AddUint32" || fname == "StoreUint32") {
+			return nil
+		}
+		// Determine proper function or method name.
 		if r := n.Recv; r != nil && len(r.List) == 1 {
 			t := r.List[0].Type
 			star := ""
@@ -426,7 +461,9 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 		if *pkgcfg != "" {
 			f.preFunc(n, fname)
 		}
-		ast.Walk(f, n.Body)
+		if pkgconfig.Granularity != "perfunc" {
+			ast.Walk(f, n.Body)
+		}
 		if *pkgcfg != "" {
 			flit := true
 			f.postFunc(n, fname, flit, n.Body)
@@ -465,6 +502,13 @@ func (f *File) preFunc(fn ast.Node, fname string) {
 }
 
 func (f *File) postFunc(fn ast.Node, funcname string, flit bool, body *ast.BlockStmt) {
+
+	// Tack on single counter write if we are in "perfunc" mode.
+	singleCtr := ""
+	if pkgconfig.Granularity == "perfunc" {
+		singleCtr = "; " + f.newCounter(fn.Pos(), fn.Pos(), 1)
+	}
+
 	// record the length of the counter var required.
 	nc := len(f.fn.units) + coverage.FirstCtrOffset
 	f.pkg.counterLengths = append(f.pkg.counterLengths, nc)
@@ -475,6 +519,16 @@ func (f *File) postFunc(fn ast.Node, funcname string, flit bool, body *ast.Block
 	ppath := pkgconfig.PkgPath
 	filename := ppath + "/" + filepath.Base(fnpos.Filename)
 
+	// The convention for cmd/cover is that if the go command that
+	// kicks off coverage specifies a local import path (e.g. "go test
+	// -cover ./thispackage"), the tool will capture full pathnames
+	// for source files instead of relative paths, which tend to work
+	// more smoothly for "go tool cover -html". See also issue #56433
+	// for more details.
+	if pkgconfig.Local {
+		filename = f.name
+	}
+
 	// Hand off function to meta-data builder.
 	fd := coverage.FuncDesc{
 		Funcname: funcname,
@@ -484,16 +538,36 @@ func (f *File) postFunc(fn ast.Node, funcname string, flit bool, body *ast.Block
 	}
 	funcId := f.mdb.AddFunc(fd)
 
-	// Generate the registration hook for the function, and insert it
-	// into the prolog.
-	cv := f.fn.counterVar
-	regHook := fmt.Sprintf("%s[0] = %d ; %s[1] = %s ; %s[2] = %d",
-		cv, len(f.fn.units), cv, mkPackageIdExpression(), cv, funcId)
+	hookWrite := func(cv string, which int, val string) string {
+		return fmt.Sprintf("%s[%d] = %s", cv, which, val)
+	}
+	if *mode == "atomic" {
+		hookWrite = func(cv string, which int, val string) string {
+			return fmt.Sprintf("%sStoreUint32(&%s[%d], %s)",
+				atomicPackagePrefix(), cv, which, val)
+		}
+	}
 
-	// Insert a function registration sequence into the function.
+	// Generate the registration hook sequence for the function. This
+	// sequence looks like
+	//
+	//   counterVar[0] = <num_units>
+	//   counterVar[1] = pkgId
+	//   counterVar[2] = fnId
+	//
+	cv := f.fn.counterVar
+	regHook := hookWrite(cv, 0, strconv.Itoa(len(f.fn.units))) + " ; " +
+		hookWrite(cv, 1, mkPackageIdExpression()) + " ; " +
+		hookWrite(cv, 2, strconv.Itoa(int(funcId))) + singleCtr
+
+	// Insert the registration sequence into the function. We want this sequence to
+	// appear before any counter updates, so use a hack to ensure that this edit
+	// applies before the edit corresponding to the prolog counter update.
+
 	boff := f.offset(body.Pos())
-	ipos := f.fset.File(body.Pos()).Pos(boff + 1)
-	f.edit.Insert(f.offset(ipos), regHook+" ; ")
+	ipos := f.fset.File(body.Pos()).Pos(boff)
+	ip := f.offset(ipos)
+	f.edit.Replace(ip, ip+1, string(f.content[ipos-1])+regHook+" ; ")
 
 	f.fn.counterVar = ""
 }
@@ -503,9 +577,6 @@ func annotate(names []string) {
 	if *pkgcfg != "" {
 		pp := pkgconfig.PkgPath
 		pn := pkgconfig.PkgName
-		if pn == "main" {
-			pp = "main"
-		}
 		mp := pkgconfig.ModulePath
 		mdb, err := encodemeta.NewCoverageMetaDataBuilder(pp, pn, mp)
 		if err != nil {
@@ -517,9 +588,9 @@ func annotate(names []string) {
 	}
 	// TODO: process files in parallel here if it matters.
 	for k, name := range names {
-		last := false
-		if k == len(names)-1 {
-			last = true
+		if strings.ContainsAny(name, "\r\n") {
+			// annotateFile uses '//line' directives, which don't permit newlines.
+			log.Fatalf("cover: input path contains newline character: %q", name)
 		}
 
 		fd := os.Stdout
@@ -539,16 +610,27 @@ func annotate(names []string) {
 			}
 			isStdout = false
 		}
-		p.annotateFile(name, fd, last)
+		p.annotateFile(name, fd)
 		if !isStdout {
 			if err := fd.Close(); err != nil {
 				log.Fatalf("cover: %s", err)
 			}
 		}
 	}
+
+	if *pkgcfg != "" {
+		fd, err := os.Create(covervarsoutfile)
+		if err != nil {
+			log.Fatalf("cover: %s", err)
+		}
+		p.emitMetaData(fd)
+		if err := fd.Close(); err != nil {
+			log.Fatalf("cover: %s", err)
+		}
+	}
 }
 
-func (p *Package) annotateFile(name string, fd io.Writer, last bool) {
+func (p *Package) annotateFile(name string, fd io.Writer) {
 	fset := token.NewFileSet()
 	content, err := os.ReadFile(name)
 	if err != nil {
@@ -576,9 +658,13 @@ func (p *Package) annotateFile(name string, fd io.Writer, last bool) {
 		// We do this even if there is an existing import, because the
 		// existing import may be shadowed at any given place we want
 		// to refer to it, and our name (_cover_atomic_) is less likely to
-		// be shadowed.
-		file.edit.Insert(file.offset(file.astFile.Name.End()),
-			fmt.Sprintf("; import %s %q", atomicPackageName, atomicPackagePath))
+		// be shadowed. The one exception is if we're visiting the
+		// sync/atomic package itself, in which case we can refer to
+		// functions directly without an import prefix. See also #57445.
+		if pkgconfig.PkgPath != "sync/atomic" {
+			file.edit.Insert(file.offset(file.astFile.Name.End()),
+				fmt.Sprintf("; import %s %q", atomicPackageName, atomicPackagePath))
+		}
 	}
 	if pkgconfig.PkgName == "main" {
 		file.edit.Insert(file.offset(file.astFile.Name.End()),
@@ -590,7 +676,12 @@ func (p *Package) annotateFile(name string, fd io.Writer, last bool) {
 	}
 	newContent := file.edit.Bytes()
 
-	fmt.Fprintf(fd, "//line %s:1\n", name)
+	if strings.ContainsAny(name, "\r\n") {
+		// This should have been checked by the caller already, but we double check
+		// here just to be sure we haven't missed a caller somewhere.
+		panic(fmt.Sprintf("annotateFile: name contains unexpected newline character: %q", name))
+	}
+	fmt.Fprintf(fd, "//line %s:1:1\n", name)
 	fd.Write(newContent)
 
 	// After printing the source tree, add some declarations for the
@@ -601,12 +692,7 @@ func (p *Package) annotateFile(name string, fd io.Writer, last bool) {
 	// Emit a reference to the atomic package to avoid
 	// import and not used error when there's no code in a file.
 	if *mode == "atomic" {
-		fmt.Fprintf(fd, "var _ = %s.LoadUint32\n", atomicPackageName)
-	}
-
-	// Last file? Emit meta-data and converage config.
-	if last {
-		p.emitMetaData(fd)
+		fmt.Fprintf(fd, "\nvar _ = %sLoadUint32\n", atomicPackagePrefix())
 	}
 }
 
@@ -622,7 +708,7 @@ func incCounterStmt(f *File, counter string) string {
 
 // atomicCounterStmt returns the expression: atomic.AddUint32(&__count[23], 1)
 func atomicCounterStmt(f *File, counter string) string {
-	return fmt.Sprintf("%s.AddUint32(&%s, 1)", atomicPackageName, counter)
+	return fmt.Sprintf("%sAddUint32(&%s, 1)", atomicPackagePrefix(), counter)
 }
 
 // newCounter creates a new counter expression of the appropriate form.
@@ -645,7 +731,6 @@ func (f *File) newCounter(start, end token.Pos, numStmt int) string {
 			NxStmts: uint32(numStmt),
 		}
 		f.fn.units = append(f.fn.units, unit)
-
 	} else {
 		stmt = counterStmt(f, fmt.Sprintf("%s.Count[%d]", *varVar,
 			len(f.blocks)))
@@ -891,12 +976,6 @@ type block1 struct {
 	index int
 }
 
-type blockSlice []block1
-
-func (b blockSlice) Len() int           { return len(b) }
-func (b blockSlice) Less(i, j int) bool { return b[i].startByte < b[j].startByte }
-func (b blockSlice) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
-
 // offset translates a token position into a 0-indexed byte offset.
 func (f *File) offset(pos token.Pos) int {
 	return f.fset.Position(pos).Offset
@@ -913,7 +992,9 @@ func (f *File) addVariables(w io.Writer) {
 		t[i].Block = f.blocks[i]
 		t[i].index = i
 	}
-	sort.Sort(blockSlice(t))
+	slices.SortFunc(t, func(a, b block1) int {
+		return cmp.Compare(a.startByte, b.startByte)
+	})
 	for i := 1; i < len(t); i++ {
 		if t[i-1].endByte > t[i].startByte {
 			fmt.Fprintf(os.Stderr, "cover: internal error: block %d overlaps block %d\n", t[i-1].index, t[i].index)
@@ -1008,38 +1089,17 @@ func dedup(p1, p2 token.Position) (r1, r2 token.Position) {
 	return key.p1, key.p2
 }
 
-type sliceWriteSeeker struct {
-	payload []byte
-	off     int64
-}
-
-func (d *sliceWriteSeeker) Write(p []byte) (n int, err error) {
-	amt := len(p)
-	towrite := d.payload[d.off:]
-	if len(towrite) < amt {
-		d.payload = append(d.payload, make([]byte, amt-len(towrite))...)
-		towrite = d.payload[d.off:]
-	}
-	copy(towrite, p)
-	d.off += int64(amt)
-	return amt, nil
-}
-
-func (d *sliceWriteSeeker) Seek(offset int64, whence int) (int64, error) {
-	if whence == io.SeekStart {
-		d.off = offset
-		return offset, nil
-	} else if whence == io.SeekCurrent {
-		d.off += offset
-		return d.off, nil
-	}
-	// other modes not supported
-	panic("bad")
-}
-
 func (p *Package) emitMetaData(w io.Writer) {
 	if *pkgcfg == "" {
 		return
+	}
+
+	// If the "EmitMetaFile" path has been set, invoke a helper
+	// that will write out a pre-cooked meta-data file for this package
+	// to the specified location, in effect simulating the execution
+	// of a test binary that doesn't do any testing to speak of.
+	if pkgconfig.EmitMetaFile != "" {
+		p.emitMetaFile(pkgconfig.EmitMetaFile)
 	}
 
 	// Something went wrong if regonly/testmain mode is in effect and
@@ -1047,6 +1107,9 @@ func (p *Package) emitMetaData(w io.Writer) {
 	if counterStmt == nil && len(p.counterLengths) != 0 {
 		panic("internal error: seen functions with regonly/testmain")
 	}
+
+	// Emit package name.
+	fmt.Fprintf(w, "\npackage %s\n\n", pkgconfig.PkgName)
 
 	// Emit package ID var.
 	fmt.Fprintf(w, "\nvar %sP uint32\n", *varVar)
@@ -1074,7 +1137,7 @@ func (p *Package) emitMetaData(w io.Writer) {
 	}
 	fmt.Fprintf(w, "}\n")
 
-	fixcfg := coverage.CoverFixupConfig{
+	fixcfg := covcmd.CoverFixupConfig{
 		Strategy:           "normal",
 		MetaVar:            mkMetaVar(),
 		MetaLen:            len(payload),
@@ -1090,5 +1153,59 @@ func (p *Package) emitMetaData(w io.Writer) {
 	}
 	if err := os.WriteFile(pkgconfig.OutConfig, fixdata, 0666); err != nil {
 		log.Fatalf("error writing %s: %v", pkgconfig.OutConfig, err)
+	}
+}
+
+// atomicOnAtomic returns true if we're instrumenting
+// the sync/atomic package AND using atomic mode.
+func atomicOnAtomic() bool {
+	return *mode == "atomic" && pkgconfig.PkgPath == "sync/atomic"
+}
+
+// atomicPackagePrefix returns the import path prefix used to refer to
+// our special import of sync/atomic; this is either set to the
+// constant atomicPackageName plus a dot or the empty string if we're
+// instrumenting the sync/atomic package itself.
+func atomicPackagePrefix() string {
+	if atomicOnAtomic() {
+		return ""
+	}
+	return atomicPackageName + "."
+}
+
+func (p *Package) emitMetaFile(outpath string) {
+	// Open output file.
+	of, err := os.OpenFile(outpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		log.Fatalf("opening covmeta %s: %v", outpath, err)
+	}
+
+	if len(p.counterLengths) == 0 {
+		// This corresponds to the case where we have no functions
+		// in the package to instrument. Leave the file empty file if
+		// this happens.
+		if err = of.Close(); err != nil {
+			log.Fatalf("closing meta-data file: %v", err)
+		}
+		return
+	}
+
+	// Encode meta-data.
+	var sws slicewriter.WriteSeeker
+	digest, err := p.mdb.Emit(&sws)
+	if err != nil {
+		log.Fatalf("encoding meta-data: %v", err)
+	}
+	payload := sws.BytesWritten()
+	blobs := [][]byte{payload}
+
+	// Write meta-data file directly.
+	mfw := encodemeta.NewCoverageMetaFileWriter(outpath, of)
+	err = mfw.Write(digest, blobs, cmode, cgran)
+	if err != nil {
+		log.Fatalf("writing meta-data file: %v", err)
+	}
+	if err = of.Close(); err != nil {
+		log.Fatalf("closing meta-data file: %v", err)
 	}
 }

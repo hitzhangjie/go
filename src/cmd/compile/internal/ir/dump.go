@@ -21,7 +21,7 @@ import (
 )
 
 // DumpAny is like FDumpAny but prints to stderr.
-func DumpAny(root interface{}, filter string, depth int) {
+func DumpAny(root any, filter string, depth int) {
 	FDumpAny(os.Stderr, root, filter, depth)
 }
 
@@ -42,7 +42,7 @@ func DumpAny(root interface{}, filter string, depth int) {
 // rather than their type; struct fields with zero values or
 // non-matching field names are omitted, and "…" means recursion
 // depth has been reached or struct fields have been omitted.
-func FDumpAny(w io.Writer, root interface{}, filter string, depth int) {
+func FDumpAny(w io.Writer, root any, filter string, depth int) {
 	if root == nil {
 		fmt.Fprintln(w, "nil")
 		return
@@ -110,7 +110,7 @@ func (p *dumper) Write(data []byte) (n int, err error) {
 }
 
 // printf is a convenience wrapper.
-func (p *dumper) printf(format string, args ...interface{}) {
+func (p *dumper) printf(format string, args ...any) {
 	if _, err := fmt.Fprintf(p, format, args...); err != nil {
 		panic(err)
 	}
@@ -218,7 +218,7 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 					continue // Op field already printed for Nodes
 				}
 				x := x.Field(i)
-				if isZeroVal(x) {
+				if x.IsZero() {
 					omitted = true
 					continue // exclude zero-valued fields
 				}
@@ -246,22 +246,6 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 	default:
 		p.printf("%v", x.Interface())
 	}
-}
-
-func isZeroVal(x reflect.Value) bool {
-	switch x.Kind() {
-	case reflect.Bool:
-		return !x.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return x.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return x.Uint() == 0
-	case reflect.String:
-		return x.String() == ""
-	case reflect.Interface, reflect.Ptr, reflect.Slice:
-		return x.IsNil()
-	}
-	return false
 }
 
 func commonPrefixLen(a, b string) (i int) {

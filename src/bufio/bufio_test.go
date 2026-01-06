@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"internal/asan"
 	"io"
 	"math/rand"
 	"strconv"
@@ -585,6 +586,9 @@ func TestWriteInvalidRune(t *testing.T) {
 }
 
 func TestReadStringAllocs(t *testing.T) {
+	if asan.Enabled {
+		t.Skip("test allocates more with -asan; see #70079")
+	}
 	r := strings.NewReader("       foo       foo        42        42        42        42        42        42        42        42       4.2       4.2       4.2       4.2\n")
 	buf := NewReader(r)
 	allocs := testing.AllocsPerRun(100, func() {
@@ -636,7 +640,7 @@ func TestWriter(t *testing.T) {
 			for l := 0; l < len(written); l++ {
 				if written[l] != data[l] {
 					t.Errorf("wrong bytes written")
-					t.Errorf("want=%q", data[0:len(written)])
+					t.Errorf("want=%q", data[:len(written)])
 					t.Errorf("have=%q", written)
 				}
 			}
@@ -935,7 +939,6 @@ func (t *testReader) Read(buf []byte) (n int, err error) {
 }
 
 func testReadLine(t *testing.T, input []byte) {
-	//for stride := 1; stride < len(input); stride++ {
 	for stride := 1; stride < 2; stride++ {
 		done := 0
 		reader := testReader{input, stride}
@@ -1146,7 +1149,7 @@ func (w errorWriterToTest) Write(p []byte) (int, error) {
 var errorWriterToTests = []errorWriterToTest{
 	{1, 0, nil, io.ErrClosedPipe, io.ErrClosedPipe},
 	{0, 1, io.ErrClosedPipe, nil, io.ErrClosedPipe},
-	{0, 0, io.ErrUnexpectedEOF, io.ErrClosedPipe, io.ErrClosedPipe},
+	{0, 0, io.ErrUnexpectedEOF, io.ErrClosedPipe, io.ErrUnexpectedEOF},
 	{0, 1, io.EOF, nil, nil},
 }
 
@@ -1482,6 +1485,17 @@ func TestReadZero(t *testing.T) {
 }
 
 func TestReaderReset(t *testing.T) {
+	checkAll := func(r *Reader, want string) {
+		t.Helper()
+		all, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(all) != want {
+			t.Errorf("ReadAll returned %q, want %q", all, want)
+		}
+	}
+
 	r := NewReader(strings.NewReader("foo foo"))
 	buf := make([]byte, 3)
 	r.Read(buf)
@@ -1490,27 +1504,23 @@ func TestReaderReset(t *testing.T) {
 	}
 
 	r.Reset(strings.NewReader("bar bar"))
-	all, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(all) != "bar bar" {
-		t.Errorf("ReadAll = %q; want bar bar", all)
-	}
+	checkAll(r, "bar bar")
 
 	*r = Reader{} // zero out the Reader
 	r.Reset(strings.NewReader("bar bar"))
-	all, err = io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(all) != "bar bar" {
-		t.Errorf("ReadAll = %q; want bar bar", all)
-	}
+	checkAll(r, "bar bar")
+
+	// Wrap a reader and then Reset to that reader.
+	r.Reset(strings.NewReader("recur"))
+	r2 := NewReader(r)
+	checkAll(r2, "recur")
+	r.Reset(strings.NewReader("recur2"))
+	r2.Reset(r)
+	checkAll(r2, "recur2")
 }
 
 func TestWriterReset(t *testing.T) {
-	var buf1, buf2, buf3 strings.Builder
+	var buf1, buf2, buf3, buf4, buf5 strings.Builder
 	w := NewWriter(&buf1)
 	w.WriteString("foo")
 
@@ -1533,6 +1543,22 @@ func TestWriterReset(t *testing.T) {
 	}
 	if buf3.String() != "bar" {
 		t.Errorf("buf3 = %q; want bar", buf3.String())
+	}
+
+	// Wrap a writer and then Reset to that writer.
+	w.Reset(&buf4)
+	w2 := NewWriter(w)
+	w2.WriteString("recur")
+	w2.Flush()
+	if buf4.String() != "recur" {
+		t.Errorf("buf4 = %q, want %q", buf4.String(), "recur")
+	}
+	w.Reset(&buf5)
+	w2.Reset(w)
+	w2.WriteString("recur2")
+	w2.Flush()
+	if buf5.String() != "recur2" {
+		t.Errorf("buf5 = %q, want %q", buf5.String(), "recur2")
 	}
 }
 

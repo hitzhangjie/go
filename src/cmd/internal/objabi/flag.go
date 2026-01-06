@@ -7,6 +7,7 @@ package objabi
 import (
 	"flag"
 	"fmt"
+	"internal/bisect"
 	"internal/buildcfg"
 	"io"
 	"log"
@@ -60,7 +61,7 @@ func expandArgs(in []string) (out []string) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			args := strings.Split(strings.TrimSpace(strings.Replace(string(slurp), "\r", "", -1)), "\n")
+			args := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(slurp), "\r", "")), "\n")
 			for i, arg := range args {
 				args[i] = DecodeArg(arg)
 			}
@@ -84,7 +85,7 @@ var buildID string // filled in by linker
 type versionFlag struct{}
 
 func (versionFlag) IsBoolFlag() bool { return true }
-func (versionFlag) Get() interface{} { return nil }
+func (versionFlag) Get() any         { return nil }
 func (versionFlag) String() string   { return "" }
 func (versionFlag) Set(s string) error {
 	name := os.Args[0]
@@ -94,16 +95,10 @@ func (versionFlag) Set(s string) error {
 
 	p := ""
 
-	if s == "goexperiment" {
-		// test/run.go uses this to discover the full set of
-		// experiment tags. Report everything.
-		p = " X:" + strings.Join(buildcfg.Experiment.All(), ",")
-	} else {
-		// If the enabled experiments differ from the baseline,
-		// include that difference.
-		if goexperiment := buildcfg.Experiment.String(); goexperiment != "" {
-			p = " X:" + goexperiment
-		}
+	// If the enabled experiments differ from the baseline,
+	// include that difference.
+	if goexperiment := buildcfg.Experiment.String(); goexperiment != "" {
+		p = " X:" + goexperiment
 	}
 
 	// The go command invokes -V=full to get a unique identifier
@@ -112,7 +107,7 @@ func (versionFlag) Set(s string) error {
 	// build ID of the binary, so that if the compiler is changed and
 	// rebuilt, we notice and rebuild all packages.
 	if s == "full" {
-		if strings.HasPrefix(buildcfg.Version, "devel") {
+		if strings.Contains(buildcfg.Version, "devel") {
 			p += " buildID=" + buildID
 		}
 	}
@@ -147,7 +142,7 @@ func (c *count) Set(s string) error {
 	return nil
 }
 
-func (c *count) Get() interface{} {
+func (c *count) Get() any {
 	return int(*c)
 }
 
@@ -203,16 +198,16 @@ func DecodeArg(arg string) string {
 }
 
 type debugField struct {
-	name string
-	help string
-	val  interface{} // *int or *string
+	name         string
+	help         string
+	concurrentOk bool // true if this field/flag is compatible with concurrent compilation
+	val          any  // *int or *string
 }
 
 type DebugFlag struct {
-	tab map[string]debugField
-	any *bool
-
-	debugSSA DebugSSA
+	tab          map[string]debugField
+	concurrentOk *bool    // this is non-nil only for compiler's DebugFlags, but only compiler has concurrent:ok fields
+	debugSSA     DebugSSA // this is non-nil only for compiler's DebugFlags.
 }
 
 // A DebugSSA function is called to set a -d ssa/... option.
@@ -233,7 +228,7 @@ type DebugSSA func(phase, flag string, val int, valString string) string
 //
 // If debugSSA is non-nil, any debug flags of the form ssa/... will be
 // passed to debugSSA for processing.
-func NewDebugFlag(debug interface{}, debugSSA DebugSSA) *DebugFlag {
+func NewDebugFlag(debug any, debugSSA DebugSSA) *DebugFlag {
 	flag := &DebugFlag{
 		tab:      make(map[string]debugField),
 		debugSSA: debugSSA,
@@ -244,12 +239,12 @@ func NewDebugFlag(debug interface{}, debugSSA DebugSSA) *DebugFlag {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		ptr := v.Field(i).Addr().Interface()
-		if f.Name == "Any" {
+		if f.Name == "ConcurrentOk" {
 			switch ptr := ptr.(type) {
 			default:
-				panic("debug.Any must have type bool")
+				panic("debug.ConcurrentOk must have type bool")
 			case *bool:
-				flag.any = ptr
+				flag.concurrentOk = ptr
 			}
 			continue
 		}
@@ -258,13 +253,15 @@ func NewDebugFlag(debug interface{}, debugSSA DebugSSA) *DebugFlag {
 		if help == "" {
 			panic(fmt.Sprintf("debug.%s is missing help text", f.Name))
 		}
+		concurrent := f.Tag.Get("concurrent")
+
 		switch ptr.(type) {
 		default:
-			panic(fmt.Sprintf("debug.%s has invalid type %v (must be int or string)", f.Name, f.Type))
-		case *int, *string:
+			panic(fmt.Sprintf("debug.%s has invalid type %v (must be int, string, or *bisect.Matcher)", f.Name, f.Type))
+		case *int, *string, **bisect.Matcher:
 			// ok
 		}
-		flag.tab[name] = debugField{name, help, ptr}
+		flag.tab[name] = debugField{name, help, concurrent == "ok", ptr}
 	}
 
 	return flag
@@ -274,10 +271,7 @@ func (f *DebugFlag) Set(debugstr string) error {
 	if debugstr == "" {
 		return nil
 	}
-	if f.any != nil {
-		*f.any = true
-	}
-	for _, name := range strings.Split(debugstr, ",") {
+	for name := range strings.SplitSeq(debugstr, ",") {
 		if name == "" {
 			continue
 		}
@@ -299,7 +293,7 @@ func (f *DebugFlag) Set(debugstr string) error {
 			nl := fmt.Sprintf("\n\t%-*s\t", maxLen, "")
 			for _, name := range names {
 				help := f.tab[name].help
-				fmt.Printf("\t%-*s\t%s\n", maxLen, name, strings.Replace(help, "\n", nl, -1))
+				fmt.Printf("\t%-*s\t%s\n", maxLen, name, strings.ReplaceAll(help, "\n", nl))
 			}
 			if f.debugSSA != nil {
 				// ssa options have their own help
@@ -329,8 +323,18 @@ func (f *DebugFlag) Set(debugstr string) error {
 					log.Fatalf("invalid debug value %v", name)
 				}
 				*vp = val
+			case **bisect.Matcher:
+				var err error
+				*vp, err = bisect.New(valstring)
+				if err != nil {
+					log.Fatalf("debug flag %v: %v", name, err)
+				}
 			default:
 				panic("bad debugtab type")
+			}
+			// assembler DebugFlags don't have a ConcurrentOk field to reset, so check against that.
+			if !t.concurrentOk && f.concurrentOk != nil {
+				*f.concurrentOk = false
 			}
 		} else if f.debugSSA != nil && strings.HasPrefix(name, "ssa/") {
 			// expect form ssa/phase/flag
@@ -344,8 +348,13 @@ func (f *DebugFlag) Set(debugstr string) error {
 			}
 			err := f.debugSSA(phase, flag, val, valstring)
 			if err != "" {
-				log.Fatalf(err)
+				log.Fatal(err)
 			}
+			// Setting this false for -d=ssa/... preserves old behavior
+			// of turning off concurrency for any debug flags.
+			// It's not known for sure if this is necessary, but it is safe.
+			*f.concurrentOk = false
+
 		} else {
 			return fmt.Errorf("unknown debug key %s\n", name)
 		}

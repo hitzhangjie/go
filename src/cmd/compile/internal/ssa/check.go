@@ -145,13 +145,14 @@ func checkFunc(f *Func) {
 					f.Fatalf("bad int32 AuxInt value for %v", v)
 				}
 				canHaveAuxInt = true
-			case auxInt64, auxARM64BitField:
+			case auxInt64, auxARM64BitField, auxARM64ConditionalParams:
 				canHaveAuxInt = true
 			case auxInt128:
 				// AuxInt must be zero, so leave canHaveAuxInt set to false.
 			case auxUInt8:
-				if v.AuxInt != int64(uint8(v.AuxInt)) {
-					f.Fatalf("bad uint8 AuxInt value for %v", v)
+				// Cast to int8 due to requirement of AuxInt, check its comment for details.
+				if v.AuxInt != int64(int8(v.AuxInt)) {
+					f.Fatalf("bad uint8 AuxInt value for %v, saw %d but need %d", v, v.AuxInt, int64(int8(v.AuxInt)))
 				}
 				canHaveAuxInt = true
 			case auxFloat32:
@@ -214,6 +215,9 @@ func checkFunc(f *Func) {
 				if v.AuxInt < 0 || v.AuxInt > 15 {
 					f.Fatalf("bad FlagConstant AuxInt value for %v", v)
 				}
+				canHaveAuxInt = true
+			case auxPanicBoundsC, auxPanicBoundsCC:
+				canHaveAux = true
 				canHaveAuxInt = true
 			default:
 				f.Fatalf("unknown aux type for %s", v.Op)
@@ -314,10 +318,32 @@ func checkFunc(f *Func) {
 					f.Fatalf("bad arg 1 type to %s: want integer, have %s", v.Op, v.Args[1].LongString())
 				}
 			case OpVarDef:
-				if !v.Aux.(*ir.Name).Type().HasPointers() {
-					f.Fatalf("vardef must have pointer type %s", v.Aux.(*ir.Name).Type().String())
+				n := v.Aux.(*ir.Name)
+				if !n.Type().HasPointers() && !IsMergeCandidate(n) {
+					f.Fatalf("vardef must be merge candidate or have pointer type %s", v.Aux.(*ir.Name).Type().String())
 				}
-
+			case OpNilCheck:
+				// nil checks have pointer type before scheduling, and
+				// void type after scheduling.
+				if f.scheduled {
+					if v.Uses != 0 {
+						f.Fatalf("nilcheck must have 0 uses %s", v.Uses)
+					}
+					if !v.Type.IsVoid() {
+						f.Fatalf("nilcheck must have void type %s", v.Type.String())
+					}
+				} else {
+					if !v.Type.IsPtrShaped() && !v.Type.IsUintptr() {
+						f.Fatalf("nilcheck must have pointer type %s", v.Type.String())
+					}
+				}
+				if !v.Args[0].Type.IsPtrShaped() && !v.Args[0].Type.IsUintptr() {
+					f.Fatalf("nilcheck must have argument of pointer type %s", v.Args[0].Type.String())
+				}
+				if !v.Args[1].Type.IsMemory() {
+					f.Fatalf("bad arg 1 type to %s: want mem, have %s",
+						v.Op, v.Args[1].Type.String())
+				}
 			}
 
 			// TODO: check for cycles in values

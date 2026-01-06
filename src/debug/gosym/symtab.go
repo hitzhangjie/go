@@ -332,7 +332,8 @@ func walksymtab(data []byte, fn func(sym) error) error {
 
 // NewTable decodes the Go symbol table (the ".gosymtab" section in ELF),
 // returning an in-memory representation.
-// Starting with Go 1.3, the Go symbol table no longer includes symbol data.
+// Starting with Go 1.3, the Go symbol table no longer includes symbol data;
+// callers should pass nil for the symtab parameter.
 func NewTable(symtab []byte, pcln *LineTable) (*Table, error) {
 	var n int
 	err := walksymtab(symtab, func(s sym) error {
@@ -567,7 +568,7 @@ func (t *Table) PCToLine(pc uint64) (file string, line int, fn *Func) {
 }
 
 // LineToPC looks up the first program counter on the given line in
-// the named file. It returns UnknownPathError or UnknownLineError if
+// the named file. It returns [UnknownFileError] or [UnknownLineError] if
 // there is an error looking up this line.
 func (t *Table) LineToPC(file string, line int) (pc uint64, fn *Func, err error) {
 	obj, ok := t.Files[file]

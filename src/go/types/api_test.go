@@ -11,56 +11,66 @@ import (
 	"go/importer"
 	"go/parser"
 	"go/token"
+	"internal/goversion"
 	"internal/testenv"
-	"reflect"
-	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	. "go/types"
+	"runtime"
 )
 
-// pkgFor parses and type checks the package specified by path and source,
-// populating info if provided.
-func pkgFor(path, source string, info *Info) (*Package, error) {
-	return pkgForMode(path, source, info, 0)
+// nopos indicates an unknown position
+var nopos token.Pos
+
+func defaultImporter(fset *token.FileSet) Importer {
+	return importer.ForCompiler(fset, runtime.Compiler, nil)
 }
 
-func pkgForMode(path, source string, info *Info, mode parser.Mode) (*Package, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, source, mode)
+func mustParse(fset *token.FileSet, src string) *ast.File {
+	f, err := parser.ParseFile(fset, pkgName(src), src, parser.ParseComments)
 	if err != nil {
-		return nil, err
+		panic(err) // so we don't need to pass *testing.T
 	}
-	conf := Config{Importer: importer.Default()}
+	return f
+}
+
+func typecheck(src string, conf *Config, info *Info) (*Package, error) {
+	// TODO(adonovan): plumb this from caller.
+	fset := token.NewFileSet()
+	f := mustParse(fset, src)
+	if conf == nil {
+		conf = &Config{
+			Error:    func(err error) {}, // collect all errors
+			Importer: defaultImporter(fset),
+		}
+	}
 	return conf.Check(f.Name.Name, fset, []*ast.File{f}, info)
 }
 
-func mustTypecheck(t testing.TB, path, source string, info *Info) string {
-	pkg, err := pkgFor(path, source, info)
+func mustTypecheck(src string, conf *Config, info *Info) *Package {
+	pkg, err := typecheck(src, conf, info)
 	if err != nil {
-		name := path
-		if pkg != nil {
-			name = "package " + pkg.Name()
-		}
-		t.Fatalf("%s: didn't type-check (%s)", name, err)
+		panic(err) // so we don't need to pass *testing.T
 	}
-	return pkg.Name()
+	return pkg
 }
 
-func mayTypecheck(t *testing.T, path, source string, info *Info) (string, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, source, 0)
-	if f == nil { // ignore errors unless f is nil
-		t.Fatalf("%s: unable to parse: %s", path, err)
+// pkgName extracts the package name from src, which must contain a package header.
+func pkgName(src string) string {
+	const kw = "package "
+	if i := strings.Index(src, kw); i >= 0 {
+		after := src[i+len(kw):]
+		n := len(after)
+		if i := strings.IndexAny(after, "\n\t ;/"); i >= 0 {
+			n = i
+		}
+		return after[:n]
 	}
-	conf := Config{
-		Error:    func(err error) {},
-		Importer: importer.Default(),
-	}
-	pkg, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, info)
-	return pkg.Name(), err
+	panic("missing package header: " + src)
 }
 
 func TestValuesInfo(t *testing.T) {
@@ -138,15 +148,15 @@ func TestValuesInfo(t *testing.T) {
 		{`package f6b; var _            =  1e-2000i`, `1e-2000i`, `complex128`, `(0 + 0i)`},
 		{`package f7b; var _            = -1e-2000i`, `-1e-2000i`, `complex128`, `(0 + 0i)`},
 
-		{`package g0; const (a = len([iota]int{}); b; c); const _ = c`, `c`, `int`, `2`}, // issue #22341
-		{`package g1; var(j int32; s int; n = 1.0<<s == j)`, `1.0`, `int32`, `1`},        // issue #48422
+		{`package g0; const (a = len([iota]int{}); b; c); const _ = c`, `c`, `int`, `2`}, // go.dev/issue/22341
+		{`package g1; var(j int32; s int; n = 1.0<<s == j)`, `1.0`, `int32`, `1`},        // go.dev/issue/48422
 	}
 
 	for _, test := range tests {
 		info := Info{
 			Types: make(map[ast.Expr]TypeAndValue),
 		}
-		name := mustTypecheck(t, "ValuesInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// look for expression
 		var expr ast.Expr
@@ -252,7 +262,7 @@ func TestTypesInfo(t *testing.T) {
 			`(string, bool)`,
 		},
 
-		// issue 6796
+		// go.dev/issue/6796
 		{`package issue6796_a; var x interface{}; var _, _ = (x.(int))`,
 			`x.(int)`,
 			`(int, bool)`,
@@ -274,7 +284,7 @@ func TestTypesInfo(t *testing.T) {
 			`(string, bool)`,
 		},
 
-		// issue 7060
+		// go.dev/issue/7060
 		{`package issue7060_a; var ( m map[int]string; x, ok = m[0] )`,
 			`m[0]`,
 			`(string, bool)`,
@@ -300,7 +310,7 @@ func TestTypesInfo(t *testing.T) {
 			`(string, bool)`,
 		},
 
-		// issue 28277
+		// go.dev/issue/28277
 		{`package issue28277_a; func f(...int)`,
 			`...int`,
 			`[]int`,
@@ -310,7 +320,7 @@ func TestTypesInfo(t *testing.T) {
 			`[][]struct{}`,
 		},
 
-		// issue 47243
+		// go.dev/issue/47243
 		{`package issue47243_a; var x int32; var _ = x << 3`, `3`, `untyped int`},
 		{`package issue47243_b; var x int32; var _ = x << 3.`, `3.`, `untyped float`},
 		{`package issue47243_c; var x int32; var _ = 1 << x`, `1 << x`, `int`},
@@ -322,10 +332,10 @@ func TestTypesInfo(t *testing.T) {
 		{`package issue47243_i; var x int32; var _ = 1 << (2 << x)`, `(2 << x)`, `untyped int`},
 		{`package issue47243_j; var x int32; var _ = 1 << (2 << x)`, `2`, `untyped int`},
 
-		// tests for broken code that doesn't parse or type-check
+		// tests for broken code that doesn't type-check
 		{broken + `x0; func _() { var x struct {f string}; x.f := 0 }`, `x.f`, `string`},
 		{broken + `x1; func _() { var z string; type x struct {f string}; y := &x{q: z}}`, `z`, `string`},
-		{broken + `x2; func _() { var a, b string; type x struct {f string}; z := &x{f: a; f: b;}}`, `b`, `string`},
+		{broken + `x2; func _() { var a, b string; type x struct {f string}; z := &x{f: a, f: b,}}`, `b`, `string`},
 		{broken + `x3; var x = panic("");`, `panic`, `func(interface{})`},
 		{`package x4; func _() { panic("") }`, `panic`, `func(interface{})`},
 		{broken + `x5; func _() { var x map[string][...]int; x = map[string][...]int{"": {1,2,3}} }`, `x`, `map[string]invalid type`},
@@ -348,13 +358,18 @@ func TestTypesInfo(t *testing.T) {
 		// instantiated types must be sanitized
 		{`package g0; type t[P any] int; var x struct{ f t[int] }; var _ = x.f`, `x.f`, `g0.t[int]`},
 
-		// issue 45096
+		// go.dev/issue/45096
 		{`package issue45096; func _[T interface{ ~int8 | ~int16 | ~int32  }](x T) { _ = x < 0 }`, `0`, `T`},
 
-		// issue 47895
+		// go.dev/issue/47895
 		{`package p; import "unsafe"; type S struct { f int }; var s S; var _ = unsafe.Offsetof(s.f)`, `s.f`, `int`},
 
-		// issue 50093
+		// go.dev/issue/74303. Note that interface field types are synthetic, so
+		// even though `func()` doesn't appear in the source, it appears in the
+		// syntax tree.
+		{`package p; type T interface { M(int) }`, `func(int)`, `func(int)`},
+
+		// go.dev/issue/50093
 		{`package u0a; func _[_ interface{int}]() {}`, `int`, `int`},
 		{`package u1a; func _[_ interface{~int}]() {}`, `~int`, `~int`},
 		{`package u2a; func _[_ interface{int | string}]() {}`, `int | string`, `int | string`},
@@ -378,20 +393,159 @@ func TestTypesInfo(t *testing.T) {
 		{`package u3c; type _ interface{int | string | ~bool}`, `int | string`, `int | string`},
 		{`package u3c; type _ interface{int | string | ~bool}`, `~bool`, `~bool`},
 		{`package u3c; type _ interface{int | string | ~float64|~bool}`, `int | string | ~float64`, `int | string | ~float64`},
+
+		// reverse type inference
+		{`package r1; var _ func(int) = g; func g[P any](P) {}`, `g`, `func(int)`},
+		{`package r2; var _ func(int) = g[int]; func g[P any](P) {}`, `g`, `func[P any](P)`}, // go.dev/issues/60212
+		{`package r3; var _ func(int) = g[int]; func g[P any](P) {}`, `g[int]`, `func(int)`},
+		{`package r4; var _ func(int, string) = g; func g[P, Q any](P, Q) {}`, `g`, `func(int, string)`},
+		{`package r5; var _ func(int, string) = g[int]; func g[P, Q any](P, Q) {}`, `g`, `func[P, Q any](P, Q)`}, // go.dev/issues/60212
+		{`package r6; var _ func(int, string) = g[int]; func g[P, Q any](P, Q) {}`, `g[int]`, `func(int, string)`},
+
+		{`package s1; func _() { f(g) }; func f(func(int)) {}; func g[P any](P) {}`, `g`, `func(int)`},
+		{`package s2; func _() { f(g[int]) }; func f(func(int)) {}; func g[P any](P) {}`, `g`, `func[P any](P)`}, // go.dev/issues/60212
+		{`package s3; func _() { f(g[int]) }; func f(func(int)) {}; func g[P any](P) {}`, `g[int]`, `func(int)`},
+		{`package s4; func _() { f(g) }; func f(func(int, string)) {}; func g[P, Q any](P, Q) {}`, `g`, `func(int, string)`},
+		{`package s5; func _() { f(g[int]) }; func f(func(int, string)) {}; func g[P, Q any](P, Q) {}`, `g`, `func[P, Q any](P, Q)`}, // go.dev/issues/60212
+		{`package s6; func _() { f(g[int]) }; func f(func(int, string)) {}; func g[P, Q any](P, Q) {}`, `g[int]`, `func(int, string)`},
+
+		{`package s7; func _() { f(g, h) }; func f[P any](func(int, P), func(P, string)) {}; func g[P any](P, P) {}; func h[P, Q any](P, Q) {}`, `g`, `func(int, int)`},
+		{`package s8; func _() { f(g, h) }; func f[P any](func(int, P), func(P, string)) {}; func g[P any](P, P) {}; func h[P, Q any](P, Q) {}`, `h`, `func(int, string)`},
+		{`package s9; func _() { f(g, h[int]) }; func f[P any](func(int, P), func(P, string)) {}; func g[P any](P, P) {}; func h[P, Q any](P, Q) {}`, `h`, `func[P, Q any](P, Q)`}, // go.dev/issues/60212
+		{`package s10; func _() { f(g, h[int]) }; func f[P any](func(int, P), func(P, string)) {}; func g[P any](P, P) {}; func h[P, Q any](P, Q) {}`, `h[int]`, `func(int, string)`},
+
+		// go.dev/issue/68639
+		// parenthesized and pointer type expressions in various positions
+		// - as variable type, not generic
+		{`package qa1; type T int; var x T`, `T`, `qa1.T`},
+		{`package qa2; type T int; var x (T)`, `T`, `qa2.T`},
+		{`package qa3; type T int; var x (T)`, `(T)`, `qa3.T`},
+		{`package qa4; type T int; var x ((T))`, `T`, `qa4.T`},
+		{`package qa5; type T int; var x ((T))`, `(T)`, `qa5.T`},
+		{`package qa6; type T int; var x ((T))`, `((T))`, `qa6.T`},
+		{`package qa7; type T int; var x *T`, `T`, `qa7.T`},
+		{`package qa8; type T int; var x *T`, `*T`, `*qa8.T`},
+		{`package qa9; type T int; var x (*T)`, `T`, `qa9.T`},
+		{`package qa10; type T int; var x (*T)`, `*T`, `*qa10.T`},
+		{`package qa11; type T int; var x *(T)`, `T`, `qa11.T`},
+		{`package qa12; type T int; var x *(T)`, `(T)`, `qa12.T`},
+		{`package qa13; type T int; var x *(T)`, `*(T)`, `*qa13.T`},
+		{`package qa14; type T int; var x (*(T))`, `(T)`, `qa14.T`},
+		{`package qa15; type T int; var x (*(T))`, `*(T)`, `*qa15.T`},
+		{`package qa16; type T int; var x (*(T))`, `(*(T))`, `*qa16.T`},
+
+		// - as ordinary function parameter, not generic
+		{`package qb1; type T int; func _(T)`, `T`, `qb1.T`},
+		{`package qb2; type T int; func _((T))`, `T`, `qb2.T`},
+		{`package qb3; type T int; func _((T))`, `(T)`, `qb3.T`},
+		{`package qb4; type T int; func _(((T)))`, `T`, `qb4.T`},
+		{`package qb5; type T int; func _(((T)))`, `(T)`, `qb5.T`},
+		{`package qb6; type T int; func _(((T)))`, `((T))`, `qb6.T`},
+		{`package qb7; type T int; func _(*T)`, `T`, `qb7.T`},
+		{`package qb8; type T int; func _(*T)`, `*T`, `*qb8.T`},
+		{`package qb9; type T int; func _((*T))`, `T`, `qb9.T`},
+		{`package qb10; type T int; func _((*T))`, `*T`, `*qb10.T`},
+		{`package qb11; type T int; func _(*(T))`, `T`, `qb11.T`},
+		{`package qb12; type T int; func _(*(T))`, `(T)`, `qb12.T`},
+		{`package qb13; type T int; func _(*(T))`, `*(T)`, `*qb13.T`},
+		{`package qb14; type T int; func _((*(T)))`, `(T)`, `qb14.T`},
+		{`package qb15; type T int; func _((*(T)))`, `*(T)`, `*qb15.T`},
+		{`package qb16; type T int; func _((*(T)))`, `(*(T))`, `*qb16.T`},
+
+		// - as method receiver, not generic
+		{`package qc1; type T int; func (T) _() {}`, `T`, `qc1.T`},
+		{`package qc2; type T int; func ((T)) _() {}`, `T`, `qc2.T`},
+		{`package qc3; type T int; func ((T)) _() {}`, `(T)`, `qc3.T`},
+		{`package qc4; type T int; func (((T))) _() {}`, `T`, `qc4.T`},
+		{`package qc5; type T int; func (((T))) _() {}`, `(T)`, `qc5.T`},
+		{`package qc6; type T int; func (((T))) _() {}`, `((T))`, `qc6.T`},
+		{`package qc7; type T int; func (*T) _() {}`, `T`, `qc7.T`},
+		{`package qc8; type T int; func (*T) _() {}`, `*T`, `*qc8.T`},
+		{`package qc9; type T int; func ((*T)) _() {}`, `T`, `qc9.T`},
+		{`package qc10; type T int; func ((*T)) _() {}`, `*T`, `*qc10.T`},
+		{`package qc11; type T int; func (*(T)) _() {}`, `T`, `qc11.T`},
+		{`package qc12; type T int; func (*(T)) _() {}`, `(T)`, `qc12.T`},
+		{`package qc13; type T int; func (*(T)) _() {}`, `*(T)`, `*qc13.T`},
+		{`package qc14; type T int; func ((*(T))) _() {}`, `(T)`, `qc14.T`},
+		{`package qc15; type T int; func ((*(T))) _() {}`, `*(T)`, `*qc15.T`},
+		{`package qc16; type T int; func ((*(T))) _() {}`, `(*(T))`, `*qc16.T`},
+
+		// - as variable type, generic
+		{`package qd1; type T[_ any] int; var x T[int]`, `T`, `qd1.T[_ any]`},
+		{`package qd2; type T[_ any] int; var x (T[int])`, `T[int]`, `qd2.T[int]`},
+		{`package qd3; type T[_ any] int; var x (T[int])`, `(T[int])`, `qd3.T[int]`},
+		{`package qd4; type T[_ any] int; var x ((T[int]))`, `T`, `qd4.T[_ any]`},
+		{`package qd5; type T[_ any] int; var x ((T[int]))`, `(T[int])`, `qd5.T[int]`},
+		{`package qd6; type T[_ any] int; var x ((T[int]))`, `((T[int]))`, `qd6.T[int]`},
+		{`package qd7; type T[_ any] int; var x *T[int]`, `T`, `qd7.T[_ any]`},
+		{`package qd8; type T[_ any] int; var x *T[int]`, `*T[int]`, `*qd8.T[int]`},
+		{`package qd9; type T[_ any] int; var x (*T[int])`, `T`, `qd9.T[_ any]`},
+		{`package qd10; type T[_ any] int; var x (*T[int])`, `*T[int]`, `*qd10.T[int]`},
+		{`package qd11; type T[_ any] int; var x *(T[int])`, `T[int]`, `qd11.T[int]`},
+		{`package qd12; type T[_ any] int; var x *(T[int])`, `(T[int])`, `qd12.T[int]`},
+		{`package qd13; type T[_ any] int; var x *(T[int])`, `*(T[int])`, `*qd13.T[int]`},
+		{`package qd14; type T[_ any] int; var x (*(T[int]))`, `(T[int])`, `qd14.T[int]`},
+		{`package qd15; type T[_ any] int; var x (*(T[int]))`, `*(T[int])`, `*qd15.T[int]`},
+		{`package qd16; type T[_ any] int; var x (*(T[int]))`, `(*(T[int]))`, `*qd16.T[int]`},
+
+		// - as ordinary function parameter, generic
+		{`package qe1; type T[_ any] int; func _(T[int])`, `T`, `qe1.T[_ any]`},
+		{`package qe2; type T[_ any] int; func _((T[int]))`, `T[int]`, `qe2.T[int]`},
+		{`package qe3; type T[_ any] int; func _((T[int]))`, `(T[int])`, `qe3.T[int]`},
+		{`package qe4; type T[_ any] int; func _(((T[int])))`, `T`, `qe4.T[_ any]`},
+		{`package qe5; type T[_ any] int; func _(((T[int])))`, `(T[int])`, `qe5.T[int]`},
+		{`package qe6; type T[_ any] int; func _(((T[int])))`, `((T[int]))`, `qe6.T[int]`},
+		{`package qe7; type T[_ any] int; func _(*T[int])`, `T`, `qe7.T[_ any]`},
+		{`package qe8; type T[_ any] int; func _(*T[int])`, `*T[int]`, `*qe8.T[int]`},
+		{`package qe9; type T[_ any] int; func _((*T[int]))`, `T`, `qe9.T[_ any]`},
+		{`package qe10; type T[_ any] int; func _((*T[int]))`, `*T[int]`, `*qe10.T[int]`},
+		{`package qe11; type T[_ any] int; func _(*(T[int]))`, `T[int]`, `qe11.T[int]`},
+		{`package qe12; type T[_ any] int; func _(*(T[int]))`, `(T[int])`, `qe12.T[int]`},
+		{`package qe13; type T[_ any] int; func _(*(T[int]))`, `*(T[int])`, `*qe13.T[int]`},
+		{`package qe14; type T[_ any] int; func _((*(T[int])))`, `(T[int])`, `qe14.T[int]`},
+		{`package qe15; type T[_ any] int; func _((*(T[int])))`, `*(T[int])`, `*qe15.T[int]`},
+		{`package qe16; type T[_ any] int; func _((*(T[int])))`, `(*(T[int]))`, `*qe16.T[int]`},
+
+		// - as method receiver, generic
+		{`package qf1; type T[_ any] int; func (T[_]) _() {}`, `T`, `qf1.T[_ any]`},
+		{`package qf2; type T[_ any] int; func ((T[_])) _() {}`, `T[_]`, `qf2.T[_]`},
+		{`package qf3; type T[_ any] int; func ((T[_])) _() {}`, `(T[_])`, `qf3.T[_]`},
+		{`package qf4; type T[_ any] int; func (((T[_]))) _() {}`, `T`, `qf4.T[_ any]`},
+		{`package qf5; type T[_ any] int; func (((T[_]))) _() {}`, `(T[_])`, `qf5.T[_]`},
+		{`package qf6; type T[_ any] int; func (((T[_]))) _() {}`, `((T[_]))`, `qf6.T[_]`},
+		{`package qf7; type T[_ any] int; func (*T[_]) _() {}`, `T`, `qf7.T[_ any]`},
+		{`package qf8; type T[_ any] int; func (*T[_]) _() {}`, `*T[_]`, `*qf8.T[_]`},
+		{`package qf9; type T[_ any] int; func ((*T[_])) _() {}`, `T`, `qf9.T[_ any]`},
+		{`package qf10; type T[_ any] int; func ((*T[_])) _() {}`, `*T[_]`, `*qf10.T[_]`},
+		{`package qf11; type T[_ any] int; func (*(T[_])) _() {}`, `T[_]`, `qf11.T[_]`},
+		{`package qf12; type T[_ any] int; func (*(T[_])) _() {}`, `(T[_])`, `qf12.T[_]`},
+		{`package qf13; type T[_ any] int; func (*(T[_])) _() {}`, `*(T[_])`, `*qf13.T[_]`},
+		{`package qf14; type T[_ any] int; func ((*(T[_]))) _() {}`, `(T[_])`, `qf14.T[_]`},
+		{`package qf15; type T[_ any] int; func ((*(T[_]))) _() {}`, `*(T[_])`, `*qf15.T[_]`},
+		{`package qf16; type T[_ any] int; func ((*(T[_]))) _() {}`, `(*(T[_]))`, `*qf16.T[_]`},
+
+		// For historic reasons, type parameters in receiver type expressions
+		// are considered both definitions and uses and thus also show up in
+		// the Info.Types map (see go.dev/issue/68670).
+		{`package t1; type T[_ any] int; func (T[P]) _() {}`, `P`, `P`},
+		{`package t2; type T[_, _ any] int; func (T[P, Q]) _() {}`, `P`, `P`},
+		{`package t3; type T[_, _ any] int; func (T[P, Q]) _() {}`, `Q`, `Q`},
 	}
 
 	for _, test := range tests {
 		info := Info{Types: make(map[ast.Expr]TypeAndValue)}
 		var name string
 		if strings.HasPrefix(test.src, broken) {
-			var err error
-			name, err = mayTypecheck(t, "TypesInfo", test.src, &info)
+			pkg, err := typecheck(test.src, nil, &info)
 			if err == nil {
-				t.Errorf("package %s: expected to fail but passed", name)
+				t.Errorf("package %s: expected to fail but passed", pkg.Name())
 				continue
 			}
+			if pkg != nil {
+				name = pkg.Name()
+			}
 		} else {
-			name = mustTypecheck(t, "TypesInfo", test.src, &info)
+			name = mustTypecheck(test.src, nil, &info).Name()
 		}
 
 		// look for expression type
@@ -409,7 +563,7 @@ func TestTypesInfo(t *testing.T) {
 
 		// check that type is correct
 		if got := typ.String(); got != test.typ {
-			t.Errorf("package %s: got %s; want %s", name, got, test.typ)
+			t.Errorf("package %s: expr = %s: got %s; want %s", name, test.expr, got, test.typ)
 		}
 	}
 }
@@ -542,6 +696,52 @@ type T[P any] []P
 				{`T`, []string{`string`}, `[]string`},
 			},
 		},
+		{`package issue51803; func foo[T any](T) {}; func _() { foo[int]( /* leave arg away on purpose */ ) }`,
+			[]testInst{{`foo`, []string{`int`}, `func(int)`}},
+		},
+
+		// reverse type inference
+		{`package reverse1a; var f func(int) = g; func g[P any](P) {}`,
+			[]testInst{{`g`, []string{`int`}, `func(int)`}},
+		},
+		{`package reverse1b; func f(func(int)) {}; func g[P any](P) {}; func _() { f(g) }`,
+			[]testInst{{`g`, []string{`int`}, `func(int)`}},
+		},
+		{`package reverse2a; var f func(int, string) = g; func g[P, Q any](P, Q) {}`,
+			[]testInst{{`g`, []string{`int`, `string`}, `func(int, string)`}},
+		},
+		{`package reverse2b; func f(func(int, string)) {}; func g[P, Q any](P, Q) {}; func _() { f(g) }`,
+			[]testInst{{`g`, []string{`int`, `string`}, `func(int, string)`}},
+		},
+		{`package reverse2c; func f(func(int, string)) {}; func g[P, Q any](P, Q) {}; func _() { f(g[int]) }`,
+			[]testInst{{`g`, []string{`int`, `string`}, `func(int, string)`}},
+		},
+		// reverse3a not possible (cannot assign to generic function outside of argument passing)
+		{`package reverse3b; func f[R any](func(int) R) {}; func g[P any](P) string { return "" }; func _() { f(g) }`,
+			[]testInst{
+				{`f`, []string{`string`}, `func(func(int) string)`},
+				{`g`, []string{`int`}, `func(int) string`},
+			},
+		},
+		{`package reverse4a; var _, _ func([]int, *float32) = g, h; func g[P, Q any]([]P, *Q) {}; func h[R any]([]R, *float32) {}`,
+			[]testInst{
+				{`g`, []string{`int`, `float32`}, `func([]int, *float32)`},
+				{`h`, []string{`int`}, `func([]int, *float32)`},
+			},
+		},
+		{`package reverse4b; func f(_, _ func([]int, *float32)) {}; func g[P, Q any]([]P, *Q) {}; func h[R any]([]R, *float32) {}; func _() { f(g, h) }`,
+			[]testInst{
+				{`g`, []string{`int`, `float32`}, `func([]int, *float32)`},
+				{`h`, []string{`int`}, `func([]int, *float32)`},
+			},
+		},
+		{`package issue59956; func f(func(int), func(string), func(bool)) {}; func g[P any](P) {}; func _() { f(g, g, g) }`,
+			[]testInst{
+				{`g`, []string{`int`}, `func(int)`},
+				{`g`, []string{`string`}, `func(string)`},
+				{`g`, []string{`bool`}, `func(bool)`},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -550,12 +750,9 @@ type T[P any] []P
 		instMap := make(map[*ast.Ident]Instance)
 		useMap := make(map[*ast.Ident]Object)
 		makePkg := func(src string) *Package {
-			f, err := parser.ParseFile(fset, "p.go", src, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			pkg, err := conf.Check("", fset, []*ast.File{f}, &Info{Instances: instMap, Uses: useMap})
-			if err != nil {
+			pkg, err := typecheck(src, &conf, &Info{Instances: instMap, Uses: useMap})
+			// allow error for issue51803
+			if err != nil && (pkg == nil || pkg.Name() != "issue51803") {
 				t.Fatal(err)
 			}
 			imports[pkg.Name()] = pkg
@@ -623,8 +820,8 @@ func sortedInstances(m map[*ast.Ident]Instance) (instances []recordedInstance) {
 	for id, inst := range m {
 		instances = append(instances, recordedInstance{id, inst})
 	}
-	sort.Slice(instances, func(i, j int) bool {
-		return instances[i].Ident.Pos() < instances[j].Ident.Pos()
+	slices.SortFunc(instances, func(a, b recordedInstance) int {
+		return CmpPos(a.Ident.Pos(), b.Ident.Pos())
 	})
 	return instances
 }
@@ -646,13 +843,18 @@ func TestDefsInfo(t *testing.T) {
 		{`package g0; type x[T any] int`, `x`, `type g0.x[T any] int`},
 		{`package g1; func f[T any]() {}`, `f`, `func g1.f[T any]()`},
 		{`package g2; type x[T any] int; func (*x[_]) m() {}`, `m`, `func (*g2.x[_]).m()`},
+
+		// Type parameters in receiver type expressions are definitions.
+		{`package r0; type T[_ any] int; func (T[P]) _() {}`, `P`, `type parameter P any`},
+		{`package r1; type T[_, _ any] int; func (T[P, Q]) _() {}`, `P`, `type parameter P any`},
+		{`package r2; type T[_, _ any] int; func (T[P, Q]) _() {}`, `Q`, `type parameter Q any`},
 	}
 
 	for _, test := range tests {
 		info := Info{
 			Defs: make(map[*ast.Ident]Object),
 		}
-		name := mustTypecheck(t, "DefsInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// find object
 		var def Object
@@ -693,7 +895,7 @@ func TestUsesInfo(t *testing.T) {
 
 		// Uses of fields are instantiated.
 		{`package s1; type N[A any] struct{ a A }; var f = N[int]{}.a`, `a`, `field a int`},
-		{`package s1; type N[A any] struct{ a A }; func (r N[B]) m(b B) { r.a = b }`, `a`, `field a B`},
+		{`package s2; type N[A any] struct{ a A }; func (r N[B]) m(b B) { r.a = b }`, `a`, `field a B`},
 
 		// Uses of methods are uses of the instantiated method.
 		{`package m0; type N[A any] int; func (r N[B]) m() { r.n() }; func (N[C]) n() {}`, `n`, `func (m0.N[B]).n()`},
@@ -713,13 +915,19 @@ func TestUsesInfo(t *testing.T) {
 		},
 		{`package m11; type T[A any] interface{ m(); n() }; func _(t1 T[int], t2 T[string]) { t1.m(); t2.n() }`, `m`, `func (m11.T[int]).m()`},
 		{`package m12; type T[A any] interface{ m(); n() }; func _(t1 T[int], t2 T[string]) { t1.m(); t2.n() }`, `n`, `func (m12.T[string]).n()`},
+
+		// For historic reasons, type parameters in receiver type expressions
+		// are considered both definitions and uses (see go.dev/issue/68670).
+		{`package r0; type T[_ any] int; func (T[P]) _() {}`, `P`, `type parameter P any`},
+		{`package r1; type T[_, _ any] int; func (T[P, Q]) _() {}`, `P`, `type parameter P any`},
+		{`package r2; type T[_, _ any] int; func (T[P, Q]) _() {}`, `Q`, `type parameter Q any`},
 	}
 
 	for _, test := range tests {
 		info := Info{
 			Uses: make(map[*ast.Ident]Object),
 		}
-		name := mustTypecheck(t, "UsesInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// find object
 		var use Object
@@ -752,10 +960,7 @@ func (r N[B]) m() { r.m(); r.n() }
 func (r *N[C]) n() {  }
 `
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "p.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 	info := Info{
 		Defs:       make(map[*ast.Ident]Object),
 		Uses:       make(map[*ast.Ident]Object),
@@ -863,7 +1068,7 @@ func TestImplicitsInfo(t *testing.T) {
 		info := Info{
 			Implicits: make(map[ast.Node]Object),
 		}
-		name := mustTypecheck(t, "ImplicitsInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// the test cases expect at most one Implicits entry
 		if len(info.Implicits) > 1 {
@@ -891,6 +1096,81 @@ func TestImplicitsInfo(t *testing.T) {
 		if got != test.want {
 			t.Errorf("package %s: got %q; want %q", name, got, test.want)
 		}
+	}
+}
+
+func TestPkgNameOf(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+
+	const src = `
+package p
+
+import (
+	. "os"
+	_ "io"
+	"math"
+	"path/filepath"
+	snort "sort"
+)
+
+// avoid imported and not used errors
+var (
+	_ = Open // os.Open
+	_ = math.Sin
+	_ = filepath.Abs
+	_ = snort.Ints
+)
+`
+
+	var tests = []struct {
+		path string // path string enclosed in "'s
+		want string
+	}{
+		{`"os"`, "."},
+		{`"io"`, "_"},
+		{`"math"`, "math"},
+		{`"path/filepath"`, "filepath"},
+		{`"sort"`, "snort"},
+	}
+
+	fset := token.NewFileSet()
+	f := mustParse(fset, src)
+	info := Info{
+		Defs:      make(map[*ast.Ident]Object),
+		Implicits: make(map[ast.Node]Object),
+	}
+	var conf Config
+	conf.Importer = defaultImporter(fset)
+	_, err := conf.Check("p", fset, []*ast.File{f}, &info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// map import paths to importDecl
+	imports := make(map[string]*ast.ImportSpec)
+	for _, s := range f.Decls[0].(*ast.GenDecl).Specs {
+		if imp, _ := s.(*ast.ImportSpec); imp != nil {
+			imports[imp.Path.Value] = imp
+		}
+	}
+
+	for _, test := range tests {
+		imp := imports[test.path]
+		if imp == nil {
+			t.Fatalf("invalid test case: import path %s not found", test.path)
+		}
+		got := info.PkgNameOf(imp)
+		if got == nil {
+			t.Fatalf("import %s: package name not found", test.path)
+		}
+		if got.Name() != test.want {
+			t.Errorf("import %s: got %s; want %s", test.path, got.Name(), test.want)
+		}
+	}
+
+	// test non-existing importDecl
+	if got := info.PkgNameOf(new(ast.ImportSpec)); got != nil {
+		t.Errorf("got %s for non-existing import declaration", got.Name())
 	}
 }
 
@@ -991,7 +1271,7 @@ func TestPredicatesInfo(t *testing.T) {
 
 	for _, test := range tests {
 		info := Info{Types: make(map[ast.Expr]TypeAndValue)}
-		name := mustTypecheck(t, "PredicatesInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// look for expression predicates
 		got := "<missing>"
@@ -1083,7 +1363,7 @@ func TestScopesInfo(t *testing.T) {
 
 	for _, test := range tests {
 		info := Info{Scopes: make(map[ast.Node]*Scope)}
-		name := mustTypecheck(t, "ScopesInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// number of scopes must match
 		if len(info.Scopes) != len(test.scopes) {
@@ -1118,14 +1398,7 @@ func TestScopesInfo(t *testing.T) {
 
 			// look for matching scope description
 			desc := kind + ":" + strings.Join(scope.Names(), " ")
-			found := false
-			for _, d := range test.scopes {
-				if desc == d {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !slices.Contains(test.scopes, desc) {
 				t.Errorf("package %s: no matching scope found for %s", name, desc)
 			}
 		}
@@ -1194,7 +1467,7 @@ func TestInitOrderInfo(t *testing.T) {
 		}`, []string{
 			"d = 3", "b = f()", "c = f()", "a = c + b",
 		}},
-		// test case for issue 7131
+		// test case for go.dev/issue/7131
 		{`package main
 
 		var counter int
@@ -1209,7 +1482,7 @@ func TestInitOrderInfo(t *testing.T) {
 		`, []string{
 			"a = next()", "b = next()", "c = next()", "d = next()", "e = next()", "f = next()", "_ = makeOrder()",
 		}},
-		// test case for issue 10709
+		// test case for go.dev/issue/10709
 		{`package p13
 
 		var (
@@ -1229,7 +1502,7 @@ func TestInitOrderInfo(t *testing.T) {
 		}`, []string{
 			"t = makeT(0)", "v = t.m()",
 		}},
-		// test case for issue 10709: same as test before, but variable decls swapped
+		// test case for go.dev/issue/10709: same as test before, but variable decls swapped
 		{`package p14
 
 		var (
@@ -1249,7 +1522,7 @@ func TestInitOrderInfo(t *testing.T) {
 		}`, []string{
 			"t = makeT(0)", "v = t.m()",
 		}},
-		// another candidate possibly causing problems with issue 10709
+		// another candidate possibly causing problems with go.dev/issue/10709
 		{`package p15
 
 		var y1 = f1()
@@ -1271,7 +1544,7 @@ func TestInitOrderInfo(t *testing.T) {
 
 	for _, test := range tests {
 		info := Info{}
-		name := mustTypecheck(t, "InitOrderInfo", test.src, &info)
+		name := mustTypecheck(test.src, nil, &info).Name()
 
 		// number of initializers must match
 		if len(info.InitOrder) != len(test.inits) {
@@ -1292,16 +1565,8 @@ func TestInitOrderInfo(t *testing.T) {
 
 func TestMultiFileInitOrder(t *testing.T) {
 	fset := token.NewFileSet()
-	mustParse := func(src string) *ast.File {
-		f, err := parser.ParseFile(fset, "main", src, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return f
-	}
-
-	fileA := mustParse(`package main; var a = 1`)
-	fileB := mustParse(`package main; var b = 2`)
+	fileA := mustParse(fset, `package main; var a = 1`)
+	fileB := mustParse(fset, `package main; var b = 2`)
 
 	// The initialization order must not depend on the parse
 	// order of the files, only on the presentation order to
@@ -1337,13 +1602,8 @@ func TestFiles(t *testing.T) {
 	var info Info
 	check := NewChecker(&conf, fset, pkg, &info)
 
-	for i, src := range sources {
-		filename := fmt.Sprintf("sources%d", i)
-		f, err := parser.ParseFile(fset, filename, src, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := check.Files([]*ast.File{f}); err != nil {
+	for _, src := range sources {
+		if err := check.Files([]*ast.File{mustParse(fset, src)}); err != nil {
 			t.Error(err)
 		}
 	}
@@ -1372,15 +1632,13 @@ func (m testImporter) Import(path string) (*Package, error) {
 func TestSelection(t *testing.T) {
 	selections := make(map[*ast.SelectorExpr]*Selection)
 
+	// We need a specific fileset in this test below for positions.
+	// Cannot use typecheck helper.
 	fset := token.NewFileSet()
 	imports := make(testImporter)
 	conf := Config{Importer: imports}
 	makePkg := func(path, src string) {
-		f, err := parser.ParseFile(fset, path+".go", src, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pkg, err := conf.Check(path, fset, []*ast.File{f}, &Info{Selections: selections})
+		pkg, err := conf.Check(path, fset, []*ast.File{mustParse(fset, src)}, &Info{Selections: selections})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1557,12 +1815,7 @@ func TestIssue8518(t *testing.T) {
 		Importer: imports,
 	}
 	makePkg := func(path, src string) {
-		f, err := parser.ParseFile(fset, path, src, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pkg, _ := conf.Check(path, fset, []*ast.File{f}, nil) // errors logged via conf.Error
-		imports[path] = pkg
+		imports[path], _ = conf.Check(path, fset, []*ast.File{mustParse(fset, src)}, nil) // errors logged via conf.Error
 	}
 
 	const libSrc = `
@@ -1577,6 +1830,32 @@ package main
 import "a"
 var _ = a.C1
 var _ = a.C2
+`
+
+	makePkg("a", libSrc)
+	makePkg("main", mainSrc) // don't crash when type-checking this package
+}
+
+func TestIssue59603(t *testing.T) {
+	fset := token.NewFileSet()
+	imports := make(testImporter)
+	conf := Config{
+		Error:    func(err error) { t.Log(err) }, // don't exit after first error
+		Importer: imports,
+	}
+	makePkg := func(path, src string) {
+		imports[path], _ = conf.Check(path, fset, []*ast.File{mustParse(fset, src)}, nil) // errors logged via conf.Error
+	}
+
+	const libSrc = `
+package a
+const C = foo
+`
+
+	const mainSrc = `
+package main
+import "a"
+const _ = a.C
 `
 
 	makePkg("a", libSrc)
@@ -1644,17 +1923,13 @@ func TestLookupFieldOrMethod(t *testing.T) {
 		// outside method set of a generic type
 		{"var x T[int]; type T[P any] struct{}; func (*T[P]) f() {}", false, nil, true},
 
-		// recursive generic types; see golang/go#52715
+		// recursive generic types; see go.dev/issue/52715
 		{"var a T[int]; type ( T[P any] struct { *N[P] }; N[P any] struct { *T[P] } ); func (N[P]) f() {}", true, []int{0, 0}, true},
 		{"var a T[int]; type ( T[P any] struct { *N[P] }; N[P any] struct { *T[P] } ); func (T[P]) f() {}", true, []int{0}, false},
 	}
 
 	for _, test := range tests {
-		pkg, err := pkgForMode("test", "package p;"+test.src, nil, 0)
-		if err != nil {
-			t.Errorf("%s: incorrect test case: %s", test.src, err)
-			continue
-		}
+		pkg := mustTypecheck("package p;"+test.src, nil, nil)
 
 		obj := pkg.Scope().Lookup("a")
 		if obj == nil {
@@ -1672,7 +1947,7 @@ func TestLookupFieldOrMethod(t *testing.T) {
 				t.Errorf("%s: got object = %v; want none", test.src, f)
 			}
 		}
-		if !sameSlice(index, test.index) {
+		if !slices.Equal(index, test.index) {
 			t.Errorf("%s: got index = %v; want %v", test.src, index, test.index)
 		}
 		if indirect != test.indirect {
@@ -1681,7 +1956,7 @@ func TestLookupFieldOrMethod(t *testing.T) {
 	}
 }
 
-// Test for golang/go#52715
+// Test for go.dev/issue/52715
 func TestLookupFieldOrMethod_RecursiveGeneric(t *testing.T) {
 	const src = `
 package pkg
@@ -1700,10 +1975,7 @@ type Instance = *Tree[int]
 `
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "foo.go", src, 0)
-	if err != nil {
-		panic(err)
-	}
+	f := mustParse(fset, src)
 	pkg := NewPackage("pkg", f.Name.Name)
 	if err := NewChecker(nil, fset, pkg, nil).Files([]*ast.File{f}); err != nil {
 		panic(err)
@@ -1713,151 +1985,10 @@ type Instance = *Tree[int]
 	_, _, _ = LookupFieldOrMethod(T, false, pkg, "M") // verify that LookupFieldOrMethod terminates
 }
 
-func sameSlice(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, x := range a {
-		if x != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// TestScopeLookupParent ensures that (*Scope).LookupParent returns
-// the correct result at various positions with the source.
-func TestScopeLookupParent(t *testing.T) {
-	fset := token.NewFileSet()
-	imports := make(testImporter)
-	conf := Config{Importer: imports}
-	mustParse := func(src string) *ast.File {
-		f, err := parser.ParseFile(fset, "dummy.go", src, parser.ParseComments)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return f
-	}
-	var info Info
-	makePkg := func(path string, files ...*ast.File) {
-		var err error
-		imports[path], err = conf.Check(path, fset, files, &info)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	makePkg("lib", mustParse("package lib; var X int"))
-	// Each /*name=kind:line*/ comment makes the test look up the
-	// name at that point and checks that it resolves to a decl of
-	// the specified kind and line number.  "undef" means undefined.
-	mainSrc := `
-/*lib=pkgname:5*/ /*X=var:1*/ /*Pi=const:8*/ /*T=typename:9*/ /*Y=var:10*/ /*F=func:12*/
-package main
-
-import "lib"
-import . "lib"
-
-const Pi = 3.1415
-type T struct{}
-var Y, _ = lib.X, X
-
-func F(){
-	const pi, e = 3.1415, /*pi=undef*/ 2.71828 /*pi=const:13*/ /*e=const:13*/
-	type /*t=undef*/ t /*t=typename:14*/ *t
-	print(Y) /*Y=var:10*/
-	x, Y := Y, /*x=undef*/ /*Y=var:10*/ Pi /*x=var:16*/ /*Y=var:16*/ ; _ = x; _ = Y
-	var F = /*F=func:12*/ F /*F=var:17*/ ; _ = F
-
-	var a []int
-	for i, x := range a /*i=undef*/ /*x=var:16*/ { _ = i; _ = x }
-
-	var i interface{}
-	switch y := i.(type) { /*y=undef*/
-	case /*y=undef*/ int /*y=var:23*/ :
-	case float32, /*y=undef*/ float64 /*y=var:23*/ :
-	default /*y=var:23*/:
-		println(y)
-	}
-	/*y=undef*/
-
-        switch int := i.(type) {
-        case /*int=typename:0*/ int /*int=var:31*/ :
-        	println(int)
-        default /*int=var:31*/ :
-        }
-}
-/*main=undef*/
-`
-
-	info.Uses = make(map[*ast.Ident]Object)
-	f := mustParse(mainSrc)
-	makePkg("main", f)
-	mainScope := imports["main"].Scope()
-	rx := regexp.MustCompile(`^/\*(\w*)=([\w:]*)\*/$`)
-	for _, group := range f.Comments {
-		for _, comment := range group.List {
-			// Parse the assertion in the comment.
-			m := rx.FindStringSubmatch(comment.Text)
-			if m == nil {
-				t.Errorf("%s: bad comment: %s",
-					fset.Position(comment.Pos()), comment.Text)
-				continue
-			}
-			name, want := m[1], m[2]
-
-			// Look up the name in the innermost enclosing scope.
-			inner := mainScope.Innermost(comment.Pos())
-			if inner == nil {
-				t.Errorf("%s: at %s: can't find innermost scope",
-					fset.Position(comment.Pos()), comment.Text)
-				continue
-			}
-			got := "undef"
-			if _, obj := inner.LookupParent(name, comment.Pos()); obj != nil {
-				kind := strings.ToLower(strings.TrimPrefix(reflect.TypeOf(obj).String(), "*types."))
-				got = fmt.Sprintf("%s:%d", kind, fset.Position(obj.Pos()).Line)
-			}
-			if got != want {
-				t.Errorf("%s: at %s: %s resolved to %s, want %s",
-					fset.Position(comment.Pos()), comment.Text, name, got, want)
-			}
-		}
-	}
-
-	// Check that for each referring identifier,
-	// a lookup of its name on the innermost
-	// enclosing scope returns the correct object.
-
-	for id, wantObj := range info.Uses {
-		inner := mainScope.Innermost(id.Pos())
-		if inner == nil {
-			t.Errorf("%s: can't find innermost scope enclosing %q",
-				fset.Position(id.Pos()), id.Name)
-			continue
-		}
-
-		// Exclude selectors and qualified identifiers---lexical
-		// refs only.  (Ideally, we'd see if the AST parent is a
-		// SelectorExpr, but that requires PathEnclosingInterval
-		// from golang.org/x/tools/go/ast/astutil.)
-		if id.Name == "X" {
-			continue
-		}
-
-		_, gotObj := inner.LookupParent(id.Name, id.Pos())
-		if gotObj != wantObj {
-			t.Errorf("%s: got %v, want %v",
-				fset.Position(id.Pos()), gotObj, wantObj)
-			continue
-		}
-	}
-}
-
 // newDefined creates a new defined type named T with the given underlying type.
 // Helper function for use with TestIncompleteInterfaces only.
 func newDefined(underlying Type) *Named {
-	tname := NewTypeName(token.NoPos, nil, "T", nil)
+	tname := NewTypeName(nopos, nil, "T", nil)
 	return NewNamed(tname, underlying, nil)
 }
 
@@ -1933,7 +2064,7 @@ func TestIdentical(t *testing.T) {
 		{`func X(int) string { return "" }; func Y(int) {}`, false},
 
 		// Generic functions. Type parameters should be considered identical modulo
-		// renaming. See also issue #49722.
+		// renaming. See also go.dev/issue/49722.
 		{`func X[P ~int](){}; func Y[Q ~int]() {}`, true},
 		{`func X[P1 any, P2 ~*P1](){}; func Y[Q1 any, Q2 ~*Q1]() {}`, true},
 		{`func X[P1 any, P2 ~[]P1](){}; func Y[Q1 any, Q2 ~*Q1]() {}`, false},
@@ -1943,11 +2074,7 @@ func TestIdentical(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		pkg, err := pkgForMode("test", "package p;"+test.src, nil, 0)
-		if err != nil {
-			t.Errorf("%s: incorrect test case: %s", test.src, err)
-			continue
-		}
+		pkg := mustTypecheck("package p;"+test.src, nil, nil)
 		X := pkg.Scope().Lookup("X")
 		Y := pkg.Scope().Lookup("Y")
 		if X == nil || Y == nil {
@@ -1977,7 +2104,7 @@ func TestIdentical_issue15173(t *testing.T) {
 }
 
 func TestIdenticalUnions(t *testing.T) {
-	tname := NewTypeName(token.NoPos, nil, "myInt", nil)
+	tname := NewTypeName(nopos, nil, "myInt", nil)
 	myInt := NewNamed(tname, Typ[Int], nil)
 	tmap := map[string]*Term{
 		"int":     NewTerm(false, Typ[Int]),
@@ -2018,13 +2145,39 @@ func TestIdenticalUnions(t *testing.T) {
 	}
 }
 
+func TestIssue61737(t *testing.T) {
+	// This test verifies that it is possible to construct invalid interfaces
+	// containing duplicate methods using the go/types API.
+	//
+	// It must be possible for importers to construct such invalid interfaces.
+	// Previously, this panicked.
+
+	sig1 := NewSignatureType(nil, nil, nil, NewTuple(NewParam(nopos, nil, "", Typ[Int])), nil, false)
+	sig2 := NewSignatureType(nil, nil, nil, NewTuple(NewParam(nopos, nil, "", Typ[String])), nil, false)
+
+	methods := []*Func{
+		NewFunc(nopos, nil, "M", sig1),
+		NewFunc(nopos, nil, "M", sig2),
+	}
+
+	embeddedMethods := []*Func{
+		NewFunc(nopos, nil, "M", sig2),
+	}
+	embedded := NewInterfaceType(embeddedMethods, nil)
+	iface := NewInterfaceType(methods, []Type{embedded})
+	iface.Complete()
+}
+
+func TestNewAlias_Issue65455(t *testing.T) {
+	obj := NewTypeName(nopos, nil, "A", nil)
+	alias := NewAlias(obj, Typ[Int])
+	alias.Underlying() // must not panic
+}
+
 func TestIssue15305(t *testing.T) {
 	const src = "package p; func f() int16; var _ = f(undef)"
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "issue15305.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 	conf := Config{
 		Error: func(err error) {}, // allow errors
 	}
@@ -2047,33 +2200,27 @@ func TestIssue15305(t *testing.T) {
 // types for composite literal expressions and composite literal type
 // expressions.
 func TestCompositeLitTypes(t *testing.T) {
-	for _, test := range []struct {
+	for i, test := range []struct {
 		lit, typ string
 	}{
 		{`[16]byte{}`, `[16]byte`},
-		{`[...]byte{}`, `[0]byte`},                // test for issue #14092
-		{`[...]int{1, 2, 3}`, `[3]int`},           // test for issue #14092
-		{`[...]int{90: 0, 98: 1, 2}`, `[100]int`}, // test for issue #14092
+		{`[...]byte{}`, `[0]byte`},                // test for go.dev/issue/14092
+		{`[...]int{1, 2, 3}`, `[3]int`},           // test for go.dev/issue/14092
+		{`[...]int{90: 0, 98: 1, 2}`, `[100]int`}, // test for go.dev/issue/14092
 		{`[]int{}`, `[]int`},
 		{`map[string]bool{"foo": true}`, `map[string]bool`},
 		{`struct{}{}`, `struct{}`},
 		{`struct{x, y int; z complex128}{}`, `struct{x int; y int; z complex128}`},
 	} {
 		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, test.lit, "package p; var _ = "+test.lit, 0)
-		if err != nil {
-			t.Fatalf("%s: %v", test.lit, err)
-		}
-
-		info := &Info{
-			Types: make(map[ast.Expr]TypeAndValue),
-		}
-		if _, err = new(Config).Check("p", fset, []*ast.File{f}, info); err != nil {
+		f := mustParse(fset, fmt.Sprintf("package p%d; var _ = %s", i, test.lit))
+		types := make(map[ast.Expr]TypeAndValue)
+		if _, err := new(Config).Check("p", fset, []*ast.File{f}, &Info{Types: types}); err != nil {
 			t.Fatalf("%s: %v", test.lit, err)
 		}
 
 		cmptype := func(x ast.Expr, want string) {
-			tv, ok := info.Types[x]
+			tv, ok := types[x]
 			if !ok {
 				t.Errorf("%s: no Types entry found", test.lit)
 				return
@@ -2121,15 +2268,12 @@ func f(x int) { y := x; print(y) }
 `
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "src", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 
 	info := &Info{
 		Defs: make(map[*ast.Ident]Object),
 	}
-	if _, err = new(Config).Check("p", fset, []*ast.File{f}, info); err != nil {
+	if _, err := new(Config).Check("p", fset, []*ast.File{f}, info); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2152,7 +2296,7 @@ func f(x int) { y := x; print(y) }
 				wantParent = false
 			}
 		case *Func:
-			if obj.Type().(*Signature).Recv() != nil { // method
+			if obj.Signature().Recv() != nil { // method
 				wantParent = false
 			}
 		}
@@ -2183,10 +2327,7 @@ var v T = c
 func f(x T) T { return foo.F(x) }
 `
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "src", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 	files := []*ast.File{f}
 
 	// type-check using all possible importers
@@ -2241,10 +2382,7 @@ func f(x T) T { return foo.F(x) }
 func TestInstantiate(t *testing.T) {
 	// eventually we like more tests but this is a start
 	const src = "package p; type T[P any] *T[P]"
-	pkg, err := pkgForMode(".", src, nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pkg := mustTypecheck(src, nil, nil)
 
 	// type T should have one type parameter
 	T := pkg.Scope().Lookup("T").Type().(*Named)
@@ -2265,6 +2403,59 @@ func TestInstantiate(t *testing.T) {
 	}
 }
 
+func TestInstantiateConcurrent(t *testing.T) {
+	const src = `package p
+
+type I[P any] interface {
+	m(P)
+	n() P
+}
+
+type J = I[int]
+
+type Nested[P any] *interface{b(P)}
+
+type K = Nested[string]
+`
+	pkg := mustTypecheck(src, nil, nil)
+
+	insts := []*Interface{
+		pkg.Scope().Lookup("J").Type().Underlying().(*Interface),
+		pkg.Scope().Lookup("K").Type().Underlying().(*Pointer).Elem().(*Interface),
+	}
+
+	// Use the interface instances concurrently.
+	for _, inst := range insts {
+		var (
+			counts  [2]int      // method counts
+			methods [2][]string // method strings
+		)
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				counts[i] = inst.NumMethods()
+				for mi := 0; mi < counts[i]; mi++ {
+					methods[i] = append(methods[i], inst.Method(mi).String())
+				}
+			}()
+		}
+		wg.Wait()
+
+		if counts[0] != counts[1] {
+			t.Errorf("mismatching method counts for %s: %d vs %d", inst, counts[0], counts[1])
+			continue
+		}
+		for i := 0; i < counts[0]; i++ {
+			if m0, m1 := methods[0][i], methods[1][i]; m0 != m1 {
+				t.Errorf("mismatching methods for %s: %s vs %s", inst, m0, m1)
+			}
+		}
+	}
+}
+
 func TestInstantiateErrors(t *testing.T) {
 	tests := []struct {
 		src    string // by convention, T must be the type being instantiated
@@ -2279,20 +2470,17 @@ func TestInstantiateErrors(t *testing.T) {
 
 	for _, test := range tests {
 		src := "package p; " + test.src
-		pkg, err := pkgForMode(".", src, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		pkg := mustTypecheck(src, nil, nil)
 
 		T := pkg.Scope().Lookup("T").Type().(*Named)
 
-		_, err = Instantiate(nil, T, test.targs, true)
+		_, err := Instantiate(nil, T, test.targs, true)
 		if err == nil {
 			t.Fatalf("Instantiate(%v, %v) returned nil error, want non-nil", T, test.targs)
 		}
 
-		var argErr *ArgumentError
-		if !errors.As(err, &argErr) {
+		argErr, ok := errors.AsType[*ArgumentError](err)
+		if !ok {
 			t.Fatalf("Instantiate(%v, %v): error is not an *ArgumentError", T, test.targs)
 		}
 
@@ -2307,8 +2495,8 @@ func TestArgumentErrorUnwrapping(t *testing.T) {
 		Index: 1,
 		Err:   Error{Msg: "test"},
 	}
-	var e Error
-	if !errors.As(err, &e) {
+	e, ok := errors.AsType[Error](err)
+	if !ok {
 		t.Fatalf("error %v does not wrap types.Error", err)
 	}
 	if e.Msg != "test" {
@@ -2321,10 +2509,7 @@ func TestInstanceIdentity(t *testing.T) {
 	conf := Config{Importer: imports}
 	makePkg := func(src string) {
 		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, "", src, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		f := mustParse(fset, src)
 		name := f.Name.Name
 		pkg, err := conf.Check(name, fset, []*ast.File{f}, nil)
 		if err != nil {
@@ -2381,10 +2566,7 @@ func fn() {
 		Defs: make(map[*ast.Ident]Object),
 	}
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "p.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 	conf := Config{}
 	pkg, err := conf.Check(f.Name.Name, fset, []*ast.File{f}, info)
 	if err != nil {
@@ -2404,9 +2586,9 @@ func fn() {
 
 		// Methods and method fields
 		{"concreteMethod", lookup("t").(*Named).Method(0)},
-		{"recv", lookup("t").(*Named).Method(0).Type().(*Signature).Recv()},
-		{"mParam", lookup("t").(*Named).Method(0).Type().(*Signature).Params().At(0)},
-		{"mResult", lookup("t").(*Named).Method(0).Type().(*Signature).Results().At(0)},
+		{"recv", lookup("t").(*Named).Method(0).Signature().Recv()},
+		{"mParam", lookup("t").(*Named).Method(0).Signature().Params().At(0)},
+		{"mResult", lookup("t").(*Named).Method(0).Signature().Results().At(0)},
 
 		// Interface methods
 		{"interfaceMethod", lookup("i").Underlying().(*Interface).Method(0)},
@@ -2430,7 +2612,6 @@ func fn() {
 	})
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			if got := len(idents[test.name]); got != 1 {
 				t.Fatalf("found %d identifiers named %s, want 1", got, test.name)
@@ -2516,10 +2697,7 @@ type Bad Bad // invalid type
 `
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "p.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := mustParse(fset, src)
 	conf := Config{Error: func(error) {}}
 	pkg, _ := conf.Check(f.Name.Name, fset, []*ast.File{f}, nil)
 
@@ -2614,10 +2792,7 @@ type V4 struct{}
 func (V4) M()
 `
 
-	pkg, err := pkgFor("p.go", src, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pkg := mustTypecheck(src, nil, nil)
 
 	T := pkg.Scope().Lookup("T").Type().Underlying().(*Interface)
 	lookup := func(name string) (*Func, bool) {
@@ -2648,4 +2823,397 @@ func (V4) M()
 
 	// V4 has no method m but has M. Should not report wrongType.
 	checkMissingMethod("V4", false)
+}
+
+func TestErrorURL(t *testing.T) {
+	var conf Config
+	*stringFieldAddr(&conf, "_ErrorURL") = " [go.dev/e/%s]"
+
+	// test case for a one-line error
+	const src1 = `
+package p
+var _ T
+`
+	_, err := typecheck(src1, &conf, nil)
+	if err == nil || !strings.HasSuffix(err.Error(), " [go.dev/e/UndeclaredName]") {
+		t.Errorf("src1: unexpected error: got %v", err)
+	}
+
+	// test case for a multi-line error
+	const src2 = `
+package p
+func f() int { return 0 }
+var _ = f(1, 2)
+`
+	_, err = typecheck(src2, &conf, nil)
+	if err == nil || !strings.Contains(err.Error(), " [go.dev/e/WrongArgCount]\n") {
+		t.Errorf("src1: unexpected error: got %v", err)
+	}
+}
+
+func TestModuleVersion(t *testing.T) {
+	// version go1.dd must be able to typecheck go1.dd.0, go1.dd.1, etc.
+	goversion := fmt.Sprintf("go1.%d", goversion.Version)
+	for _, v := range []string{
+		goversion,
+		goversion + ".0",
+		goversion + ".1",
+		goversion + ".rc",
+	} {
+		conf := Config{GoVersion: v}
+		pkg := mustTypecheck("package p", &conf, nil)
+		if pkg.GoVersion() != conf.GoVersion {
+			t.Errorf("got %s; want %s", pkg.GoVersion(), conf.GoVersion)
+		}
+	}
+}
+
+func TestFileVersions(t *testing.T) {
+	for _, test := range []struct {
+		goVersion   string
+		fileVersion string
+		wantVersion string
+	}{
+		{"", "", ""},                    // no versions specified
+		{"go1.19", "", "go1.19"},        // module version specified
+		{"", "go1.20", "go1.21"},        // file version specified below minimum of 1.21
+		{"go1", "", "go1"},              // no file version specified
+		{"go1", "goo1.22", "go1"},       // invalid file version specified
+		{"go1", "go1.19", "go1.21"},     // file version specified below minimum of 1.21
+		{"go1", "go1.20", "go1.21"},     // file version specified below minimum of 1.21
+		{"go1", "go1.21", "go1.21"},     // file version specified at 1.21
+		{"go1", "go1.22", "go1.22"},     // file version specified above 1.21
+		{"go1.19", "", "go1.19"},        // no file version specified
+		{"go1.19", "goo1.22", "go1.19"}, // invalid file version specified
+		{"go1.19", "go1.20", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.19", "go1.21", "go1.21"},  // file version specified at 1.21
+		{"go1.19", "go1.22", "go1.22"},  // file version specified above 1.21
+		{"go1.20", "", "go1.20"},        // no file version specified
+		{"go1.20", "goo1.22", "go1.20"}, // invalid file version specified
+		{"go1.20", "go1.19", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.20", "go1.20", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.20", "go1.21", "go1.21"},  // file version specified at 1.21
+		{"go1.20", "go1.22", "go1.22"},  // file version specified above 1.21
+		{"go1.21", "", "go1.21"},        // no file version specified
+		{"go1.21", "goo1.22", "go1.21"}, // invalid file version specified
+		{"go1.21", "go1.19", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.21", "go1.20", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.21", "go1.21", "go1.21"},  // file version specified at 1.21
+		{"go1.21", "go1.22", "go1.22"},  // file version specified above 1.21
+		{"go1.22", "", "go1.22"},        // no file version specified
+		{"go1.22", "goo1.22", "go1.22"}, // invalid file version specified
+		{"go1.22", "go1.19", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.22", "go1.20", "go1.21"},  // file version specified below minimum of 1.21
+		{"go1.22", "go1.21", "go1.21"},  // file version specified at 1.21
+		{"go1.22", "go1.22", "go1.22"},  // file version specified above 1.21
+
+		// versions containing release numbers
+		// (file versions containing release numbers are considered invalid)
+		{"go1.19.0", "", "go1.19.0"},         // no file version specified
+		{"go1.20.1", "go1.19.1", "go1.20.1"}, // invalid file version
+		{"go1.20.1", "go1.21.1", "go1.20.1"}, // invalid file version
+		{"go1.21.1", "go1.19.1", "go1.21.1"}, // invalid file version
+		{"go1.21.1", "go1.21.1", "go1.21.1"}, // invalid file version
+		{"go1.22.1", "go1.19.1", "go1.22.1"}, // invalid file version
+		{"go1.22.1", "go1.21.1", "go1.22.1"}, // invalid file version
+	} {
+		var src string
+		if test.fileVersion != "" {
+			src = "//go:build " + test.fileVersion + "\n"
+		}
+		src += "package p"
+
+		conf := Config{GoVersion: test.goVersion}
+		versions := make(map[*ast.File]string)
+		var info Info
+		info.FileVersions = versions
+		mustTypecheck(src, &conf, &info)
+
+		n := 0
+		for _, v := range versions {
+			want := test.wantVersion
+			if v != want {
+				t.Errorf("%q: unexpected file version: got %q, want %q", src, v, want)
+			}
+			n++
+		}
+		if n != 1 {
+			t.Errorf("%q: incorrect number of map entries: got %d", src, n)
+		}
+	}
+}
+
+// TestTooNew ensures that "too new" errors are emitted when the file
+// or module is tagged with a newer version of Go than this go/types.
+func TestTooNew(t *testing.T) {
+	for _, test := range []struct {
+		goVersion   string // package's Go version (as if derived from go.mod file)
+		fileVersion string // file's Go version (becomes a build tag)
+		wantErr     string // expected substring of concatenation of all errors
+	}{
+		{"go1.98", "", "package requires newer Go version go1.98"},
+		{"", "go1.99", "p:2:9: file requires newer Go version go1.99"},
+		{"go1.98", "go1.99", "package requires newer Go version go1.98"}, // (two
+		{"go1.98", "go1.99", "file requires newer Go version go1.99"},    // errors)
+	} {
+		var src string
+		if test.fileVersion != "" {
+			src = "//go:build " + test.fileVersion + "\n"
+		}
+		src += "package p; func f()"
+
+		var errs []error
+		conf := Config{
+			GoVersion: test.goVersion,
+			Error:     func(err error) { errs = append(errs, err) },
+		}
+		info := &Info{Defs: make(map[*ast.Ident]Object)}
+		typecheck(src, &conf, info)
+		got := fmt.Sprint(errs)
+		if !strings.Contains(got, test.wantErr) {
+			t.Errorf("%q: unexpected error: got %q, want substring %q",
+				src, got, test.wantErr)
+		}
+
+		// Assert that declarations were type checked nonetheless.
+		var gotObjs []string
+		for id, obj := range info.Defs {
+			if obj != nil {
+				objStr := strings.ReplaceAll(fmt.Sprintf("%s:%T", id.Name, obj), "types2", "types")
+				gotObjs = append(gotObjs, objStr)
+			}
+		}
+		wantObjs := "f:*types.Func"
+		if !strings.Contains(fmt.Sprint(gotObjs), wantObjs) {
+			t.Errorf("%q: got %s, want substring %q",
+				src, gotObjs, wantObjs)
+		}
+	}
+}
+
+// This is a regression test for #66704.
+func TestUnaliasTooSoonInCycle(t *testing.T) {
+	setGotypesalias(t, true)
+	const src = `package a
+
+var x T[B] // this appears to cause Unalias to be called on B while still Invalid
+
+type T[_ any] struct{}
+type A T[B]
+type B = T[A]
+`
+	pkg := mustTypecheck(src, nil, nil)
+	B := pkg.Scope().Lookup("B")
+
+	got, want := Unalias(B.Type()).String(), "a.T[a.A]"
+	if got != want {
+		t.Errorf("Unalias(type B = T[A]) = %q, want %q", got, want)
+	}
+}
+
+func TestAlias_Rhs(t *testing.T) {
+	setGotypesalias(t, true)
+	const src = `package p
+
+type A = B
+type B = C
+type C = int
+`
+
+	pkg := mustTypecheck(src, nil, nil)
+	A := pkg.Scope().Lookup("A")
+
+	got, want := A.Type().(*Alias).Rhs().String(), "p.B"
+	if got != want {
+		t.Errorf("A.Rhs = %s, want %s", got, want)
+	}
+}
+
+// Test the hijacking described of "any" described in golang/go#66921, for type
+// checking.
+func TestAnyHijacking_Check(t *testing.T) {
+	for _, enableAlias := range []bool{false, true} {
+		t.Run(fmt.Sprintf("EnableAlias=%t", enableAlias), func(t *testing.T) {
+			setGotypesalias(t, enableAlias)
+			var wg sync.WaitGroup
+			for i := 0; i < 10; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					pkg := mustTypecheck("package p; var x any", nil, nil)
+					x := pkg.Scope().Lookup("x")
+					if _, gotAlias := x.Type().(*Alias); gotAlias != enableAlias {
+						t.Errorf(`Lookup("x").Type() is %T: got Alias: %t, want %t`, x.Type(), gotAlias, enableAlias)
+					}
+				}()
+			}
+			wg.Wait()
+		})
+	}
+}
+
+// Test the hijacking described of "any" described in golang/go#66921, for
+// Scope.Lookup outside of type checking.
+func TestAnyHijacking_Lookup(t *testing.T) {
+	for _, enableAlias := range []bool{false, true} {
+		t.Run(fmt.Sprintf("EnableAlias=%t", enableAlias), func(t *testing.T) {
+			setGotypesalias(t, enableAlias)
+			a := Universe.Lookup("any")
+			if _, gotAlias := a.Type().(*Alias); gotAlias != enableAlias {
+				t.Errorf(`Lookup("x").Type() is %T: got Alias: %t, want %t`, a.Type(), gotAlias, enableAlias)
+			}
+		})
+	}
+}
+
+func setGotypesalias(t *testing.T, enable bool) {
+	if enable {
+		t.Setenv("GODEBUG", "gotypesalias=1")
+	} else {
+		t.Setenv("GODEBUG", "gotypesalias=0")
+	}
+}
+
+// TestVersionIssue69477 is a regression test for issue #69477,
+// in which the type checker would panic while attempting
+// to compute which file it is "in" based on syntax position.
+func TestVersionIssue69477(t *testing.T) {
+	fset := token.NewFileSet()
+	f, _ := parser.ParseFile(fset, "a.go", "package p; const k = 123", 0)
+
+	// Set an invalid Pos on the BasicLit.
+	ast.Inspect(f, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok {
+			lit.ValuePos = 99999
+		}
+		return true
+	})
+
+	// Type check. The checker will consult the effective
+	// version for the BasicLit 123. This used to panic.
+	pkg := NewPackage("p", "p")
+	check := NewChecker(&Config{}, fset, pkg, nil)
+	if err := check.Files([]*ast.File{f}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestVersionWithoutPos is a regression test for issue #69477,
+// in which the type checker would use position information
+// to compute which file it is "in" based on syntax position.
+//
+// As a rule the type checker should not depend on position
+// information for correctness, only for error messages and
+// Object.Pos. (Scope.LookupParent was a mistake.)
+//
+// The Checker now holds the effective version in a state variable.
+func TestVersionWithoutPos(t *testing.T) {
+	fset := token.NewFileSet()
+	f, _ := parser.ParseFile(fset, "a.go", "//go:build go1.22\n\npackage p; var _ int", 0)
+
+	// Splice in a decl from another file. Its pos will be wrong.
+	f2, _ := parser.ParseFile(fset, "a.go", "package q; func _(s func(func() bool)) { for range s {} }", 0)
+	f.Decls[0] = f2.Decls[0]
+
+	// Type check. The checker will consult the effective
+	// version (1.22) for the for-range stmt to know whether
+	// range-over-func are permitted: they are not.
+	// (Previously, no error was reported.)
+	pkg := NewPackage("p", "p")
+	check := NewChecker(&Config{}, fset, pkg, nil)
+	err := check.Files([]*ast.File{f})
+	got := fmt.Sprint(err)
+	want := "range over s (variable of type func(func() bool)): requires go1.23"
+	if !strings.Contains(got, want) {
+		t.Errorf("check error was %q, want substring %q", got, want)
+	}
+}
+
+func TestVarKind(t *testing.T) {
+	fset := token.NewFileSet()
+	f, _ := parser.ParseFile(fset, "a.go", `package p
+
+var global int
+
+type T struct { field int }
+
+func (recv T) f(param int) (result int) {
+	var local int
+	local2 := 0
+	switch local3 := any(local).(type) {
+	default:
+		_ = local3
+	}
+	return local2
+}
+`, 0)
+
+	pkg := NewPackage("p", "p")
+	info := &Info{Defs: make(map[*ast.Ident]Object)}
+	check := NewChecker(&Config{}, fset, pkg, info)
+	if err := check.Files([]*ast.File{f}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, obj := range info.Defs {
+		if v, ok := obj.(*Var); ok {
+			got = append(got, fmt.Sprintf("%s: %v", v.Name(), v.Kind()))
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"field: FieldVar",
+		"global: PackageVar",
+		"local2: LocalVar",
+		"local: LocalVar",
+		"param: ParamVar",
+		"recv: RecvVar",
+		"result: ResultVar",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestIssue73871(t *testing.T) {
+	const src = `package p
+
+func f[T ~[]byte](y T) []byte { return append([]byte(nil), y...) }
+
+type B []byte
+var _ = f[B]
+`
+	fset := token.NewFileSet()
+	f, _ := parser.ParseFile(fset, "p.go", src, 0)
+
+	pkg := NewPackage("p", "p")
+	info := &Info{Types: make(map[ast.Expr]TypeAndValue)}
+	check := NewChecker(&Config{}, fset, pkg, info)
+	if err := check.Files([]*ast.File{f}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check type inferred for 'append'.
+	//
+	// Before CL 688815, the inferred type of append's y parameter
+	// was T. When a client such as x/tools/go/ssa instantiated T=B,
+	// it would result in the Signature "func([]byte, B)" with the
+	// variadic flag set, an invalid combination that caused
+	// NewSignatureType to panic.
+	append := f.Decls[0].(*ast.FuncDecl).Body.List[0].(*ast.ReturnStmt).Results[0].(*ast.CallExpr).Fun
+	tAppend := info.TypeOf(append).(*Signature)
+	if got, want := fmt.Sprint(tAppend), "func([]byte, ...byte) []byte"; got != want {
+		// Before CL 688815, tAppend was func([]byte, T) []byte,
+		// where T prints as "<expected string type>".
+		t.Errorf("append: got type %s, want %s", got, want)
+	}
+
+	// Instantiate the type inferred for append(...) at T=B.
+	// Before the fix in CL 689277, NewSignatureType would panic.
+	params := slices.Collect(tAppend.Params().Variables())
+	params[1] = NewVar(token.NoPos, pkg, "", pkg.Scope().Lookup("B").Type())
+	sig := NewSignatureType(nil, nil, nil, NewTuple(params...), tAppend.Results(), true)
+	if got, want := fmt.Sprint(sig), "func([]byte, p.B...) []byte"; got != want {
+		t.Errorf("instantiated: got type %s, want %s", got, want)
+	}
 }

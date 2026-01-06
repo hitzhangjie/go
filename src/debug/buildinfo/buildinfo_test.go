@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"internal/obscuretestdata"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -134,6 +135,22 @@ func TestReadFile(t *testing.T) {
 		}
 	}
 
+	damageStringLen := func(t *testing.T, name string) {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := bytes.Index(data, []byte("\xff Go buildinf:"))
+		if i < 0 {
+			t.Fatal("Go buildinf not found")
+		}
+		verLen := data[i+32:]
+		binary.PutUvarint(verLen, 16<<40) // 16TB ought to be enough for anyone.
+		if err := os.WriteFile(name, data, 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	goVersionRe := regexp.MustCompile("(?m)^go\t.*\n")
 	buildRe := regexp.MustCompile("(?m)^build\t.*\n")
 	cleanOutputForComparison := func(got string) string {
@@ -194,6 +211,15 @@ func TestReadFile(t *testing.T) {
 			wantErr: "not a Go executable",
 		},
 		{
+			name: "invalid_str_len",
+			build: func(t *testing.T, goos, goarch, buildmode string) string {
+				name := buildWithModules(t, goos, goarch, buildmode)
+				damageStringLen(t, name)
+				return name
+			},
+			wantErr: "not a Go executable",
+		},
+		{
 			name:  "valid_gopath",
 			build: buildWithGOPATH,
 			want: "go\tGOVERSION\n" +
@@ -212,16 +238,13 @@ func TestReadFile(t *testing.T) {
 	}
 
 	for _, p := range platforms {
-		p := p
 		t.Run(p.goos+"_"+p.goarch, func(t *testing.T) {
 			if p != runtimePlatform && !*flagAll {
 				t.Skipf("skipping platforms other than %s_%s because -all was not set", runtimePlatform.goos, runtimePlatform.goarch)
 			}
 			for _, mode := range buildModes {
-				mode := mode
 				t.Run(mode, func(t *testing.T) {
 					for _, tc := range cases {
-						tc := tc
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 							name := tc.build(t, p.goos, p.goarch, mode)
@@ -236,7 +259,7 @@ func TestReadFile(t *testing.T) {
 									t.Fatalf("unexpected success; want error containing %q", tc.wantErr)
 								}
 								got := info.String()
-								if clean := cleanOutputForComparison(string(got)); got != tc.want && clean != tc.want {
+								if clean := cleanOutputForComparison(got); got != tc.want && clean != tc.want {
 									t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
 								}
 							}
@@ -246,6 +269,60 @@ func TestReadFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test117 verifies that parsing of the old, pre-1.18 format works.
+func Test117(t *testing.T) {
+	b, err := obscuretestdata.ReadFile("testdata/go117/go117.base64")
+	if err != nil {
+		t.Fatalf("ReadFile got err %v, want nil", err)
+	}
+
+	info, err := buildinfo.Read(bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("Read got err %v, want nil", err)
+	}
+
+	if info.GoVersion != "go1.17" {
+		t.Errorf("GoVersion got %s want go1.17", info.GoVersion)
+	}
+	if info.Path != "example.com/go117" {
+		t.Errorf("Path got %s want example.com/go117", info.Path)
+	}
+	if info.Main.Path != "example.com/go117" {
+		t.Errorf("Main.Path got %s want example.com/go117", info.Main.Path)
+	}
+}
+
+// TestNotGo verifies that parsing of a non-Go binary returns the proper error.
+func TestNotGo(t *testing.T) {
+	b, err := obscuretestdata.ReadFile("testdata/notgo/notgo.base64")
+	if err != nil {
+		t.Fatalf("ReadFile got err %v, want nil", err)
+	}
+
+	_, err = buildinfo.Read(bytes.NewReader(b))
+	if err == nil {
+		t.Fatalf("Read got nil err, want non-nil")
+	}
+
+	// The precise error text here isn't critical, but we want something
+	// like errNotGoExe rather than e.g., a file read error.
+	if !strings.Contains(err.Error(), "not a Go executable") {
+		t.Errorf("ReadFile got err %v want not a Go executable", err)
+	}
+}
+
+// FuzzIssue57002 is a regression test for golang.org/issue/57002.
+//
+// The cause of issue 57002 is when pointerSize is not being checked,
+// the read can panic with slice bounds out of range
+func FuzzIssue57002(f *testing.F) {
+	// input from issue
+	f.Add([]byte{0x4d, 0x5a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x50, 0x45, 0x0, 0x0, 0x0, 0x0, 0x5, 0x0, 0x20, 0x20, 0x20, 0x20, 0x0, 0x0, 0x0, 0x0, 0x20, 0x3f, 0x0, 0x20, 0x0, 0x0, 0x20, 0x20, 0x20, 0x20, 0x20, 0xff, 0x20, 0x20, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xb, 0x20, 0x20, 0x20, 0xfc, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x9, 0x0, 0x0, 0x0, 0x20, 0x0, 0x0, 0x0, 0x20, 0x20, 0x20, 0x20, 0x20, 0xef, 0x20, 0xff, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf, 0x0, 0x2, 0x0, 0x20, 0x0, 0x0, 0x9, 0x0, 0x4, 0x0, 0x20, 0xf6, 0x0, 0xd3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x20, 0x1, 0x0, 0x0, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xa, 0x20, 0xa, 0x20, 0x20, 0x20, 0xff, 0x20, 0x20, 0xff, 0x20, 0x47, 0x6f, 0x20, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x69, 0x6e, 0x66, 0x3a, 0xde, 0xb5, 0xdf, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x6, 0x7f, 0x7f, 0x7f, 0x20, 0xf4, 0xb2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x20, 0x20, 0x0, 0x0, 0x0, 0x0, 0x5, 0x0, 0x20, 0x20, 0x20, 0x20, 0x0, 0x0, 0x0, 0x0, 0x20, 0x3f, 0x27, 0x20, 0x0, 0xd, 0x0, 0xa, 0x20, 0x20, 0x20, 0x20, 0x20, 0xff, 0x20, 0x20, 0xff, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x0, 0x20, 0x20, 0x0, 0x0, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x5c, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})
+	f.Fuzz(func(t *testing.T, input []byte) {
+		buildinfo.Read(bytes.NewReader(input))
+	})
 }
 
 // TestIssue54968 is a regression test for golang.org/issue/54968.
@@ -314,4 +391,22 @@ func TestIssue54968(t *testing.T) {
 			}
 		})
 	}
+}
+
+func FuzzRead(f *testing.F) {
+	go117, err := obscuretestdata.ReadFile("testdata/go117/go117.base64")
+	if err != nil {
+		f.Errorf("Error reading go117: %v", err)
+	}
+	f.Add(go117)
+
+	notgo, err := obscuretestdata.ReadFile("testdata/notgo/notgo.base64")
+	if err != nil {
+		f.Errorf("Error reading notgo: %v", err)
+	}
+	f.Add(notgo)
+
+	f.Fuzz(func(t *testing.T, in []byte) {
+		buildinfo.Read(bytes.NewReader(in))
+	})
 }

@@ -152,12 +152,10 @@ func AuxCallLSym(name string) *AuxCall {
 // supplied to one of the Bloc functions. Each of the bloc names and
 // valu names should be unique across the Fun.
 func (c *Conf) Fun(entry string, blocs ...bloc) fun {
-	f := NewFunc(c.Frontend())
-	f.Config = c.config
 	// TODO: Either mark some SSA tests as t.Parallel,
 	// or set up a shared Cache and Reset it between tests.
 	// But not both.
-	f.Cache = new(Cache)
+	f := c.config.NewFunc(c.Frontend(), new(Cache))
 	f.pass = &emptyPass
 	f.cachedLineStarts = newXposmap(map[int]lineRange{0: {0, 100}, 1: {0, 100}, 2: {0, 100}, 3: {0, 100}, 4: {0, 100}})
 
@@ -208,7 +206,7 @@ func (c *Conf) Fun(entry string, blocs ...bloc) fun {
 // Bloc defines a block for Fun. The bloc name should be unique
 // across the containing Fun. entries should consist of calls to valu,
 // as well as one call to Goto, If, or Exit to specify the block kind.
-func Bloc(name string, entries ...interface{}) bloc {
+func Bloc(name string, entries ...any) bloc {
 	b := bloc{}
 	b.name = name
 	seenCtrl := false
@@ -250,6 +248,11 @@ func If(cond, sub, alt string) ctrl {
 // Exit specifies a BlockExit.
 func Exit(arg string) ctrl {
 	return ctrl{BlockExit, arg, []string{}}
+}
+
+// Ret specifies a BlockRet.
+func Ret(arg string) ctrl {
+	return ctrl{BlockRet, arg, []string{}}
 }
 
 // Eq specifies a BlockAMD64EQ.
@@ -472,7 +475,7 @@ func opcodeMap(f *Func) map[Op]int {
 	return m
 }
 
-// opcodeCounts checks that the number of opcodes listed in m agree with the
+// checkOpcodeCounts checks that the number of opcodes listed in m agree with the
 // number of opcodes that appear in the function.
 func checkOpcodeCounts(t *testing.T, f *Func, m map[Op]int) {
 	n := opcodeMap(f)

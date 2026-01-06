@@ -545,6 +545,16 @@ var lexPosTests = []lexTest{
 		{itemRightDelim, 11, "}}", 2},
 		{itemEOF, 13, "", 2},
 	}},
+	{"longcomment", "{{/*\n*/}}\n{{undefinedFunction \"test\"}}", []item{
+		{itemComment, 2, "/*\n*/", 1},
+		{itemText, 9, "\n", 2},
+		{itemLeftDelim, 10, "{{", 3},
+		{itemIdentifier, 12, "undefinedFunction", 3},
+		{itemSpace, 29, " ", 3},
+		{itemString, 30, "\"test\"", 3},
+		{itemRightDelim, 36, "}}", 3},
+		{itemEOF, 38, "", 3},
+	}},
 }
 
 // The other tests don't check position, to make the test cases easier to construct.
@@ -567,16 +577,4 @@ func TestPos(t *testing.T) {
 			}
 		}
 	}
-}
-
-// parseLexer is a local version of parse that lets us pass in the lexer instead of building it.
-// We expect an error, so the tree set and funcs list are explicitly nil.
-func (t *Tree) parseLexer(lex *lexer) (tree *Tree, err error) {
-	defer t.recover(&err)
-	t.ParseName = t.Name
-	t.startParse(nil, lex, map[string]*Tree{})
-	t.parse()
-	t.add()
-	t.stopParse()
-	return t, nil
 }

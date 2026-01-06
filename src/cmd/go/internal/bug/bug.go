@@ -21,6 +21,7 @@ import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/envcmd"
+	"cmd/go/internal/modload"
 	"cmd/go/internal/web"
 	"cmd/go/internal/work"
 )
@@ -37,19 +38,21 @@ The report includes useful system information.
 
 func init() {
 	CmdBug.Flag.BoolVar(&cfg.BuildV, "v", false, "")
+	base.AddChdirFlag(&CmdBug.Flag)
 }
 
 func runBug(ctx context.Context, cmd *base.Command, args []string) {
+	moduleLoaderState := modload.NewState()
 	if len(args) > 0 {
 		base.Fatalf("go: bug takes no arguments")
 	}
-	work.BuildInit()
+	work.BuildInit(moduleLoaderState)
 
 	var buf strings.Builder
 	buf.WriteString(bugHeader)
 	printGoVersion(&buf)
 	buf.WriteString("### Does this issue reproduce with the latest release?\n\n\n")
-	printEnvDetails(&buf)
+	printEnvDetails(moduleLoaderState, &buf)
 	buf.WriteString(bugFooter)
 
 	body := buf.String()
@@ -68,7 +71,7 @@ const bugFooter = `### What did you do?
 <!--
 If possible, provide a recipe for reproducing the error.
 A complete runnable program is good.
-A link on play.golang.org is best.
+A link on go.dev/play is best.
 -->
 
 
@@ -90,22 +93,22 @@ func printGoVersion(w io.Writer) {
 	fmt.Fprintf(w, "\n")
 }
 
-func printEnvDetails(w io.Writer) {
+func printEnvDetails(loaderstate *modload.State, w io.Writer) {
 	fmt.Fprintf(w, "### What operating system and processor architecture are you using (`go env`)?\n\n")
 	fmt.Fprintf(w, "<details><summary><code>go env</code> Output</summary><br><pre>\n")
 	fmt.Fprintf(w, "$ go env\n")
-	printGoEnv(w)
+	printGoEnv(loaderstate, w)
 	printGoDetails(w)
 	printOSDetails(w)
 	printCDetails(w)
 	fmt.Fprintf(w, "</pre></details>\n\n")
 }
 
-func printGoEnv(w io.Writer) {
+func printGoEnv(loaderstate *modload.State, w io.Writer) {
 	env := envcmd.MkEnv()
-	env = append(env, envcmd.ExtraEnvVars()...)
-	env = append(env, envcmd.ExtraEnvVarsCostly()...)
-	envcmd.PrintEnv(w, env)
+	env = append(env, envcmd.ExtraEnvVars(loaderstate)...)
+	env = append(env, envcmd.ExtraEnvVarsCostly(loaderstate)...)
+	envcmd.PrintEnv(w, env, false)
 }
 
 func printGoDetails(w io.Writer) {

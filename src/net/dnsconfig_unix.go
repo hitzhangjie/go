@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !js && !windows
+//go:build !windows
 
 // Read system DNS config from /etc/resolv.conf
 
@@ -10,6 +10,8 @@ package net
 
 import (
 	"internal/bytealg"
+	"internal/stringslite"
+	"net/netip"
 	"time"
 )
 
@@ -51,9 +53,7 @@ func dnsReadConfig(filename string) *dnsConfig {
 				// One more check: make sure server name is
 				// just an IP address. Otherwise we need DNS
 				// to look it up.
-				if parseIPv4(f[1]) != nil {
-					conf.servers = append(conf.servers, JoinHostPort(f[1], "53"))
-				} else if ip, _ := parseIPv6Zone(f[1]); ip != nil {
+				if _, err := netip.ParseAddr(f[1]); err == nil {
 					conf.servers = append(conf.servers, JoinHostPort(f[1], "53"))
 				}
 			}
@@ -76,7 +76,7 @@ func dnsReadConfig(filename string) *dnsConfig {
 		case "options": // magic options
 			for _, s := range f[1:] {
 				switch {
-				case hasPrefix(s, "ndots:"):
+				case stringslite.HasPrefix(s, "ndots:"):
 					n, _, _ := dtoi(s[6:])
 					if n < 0 {
 						n = 0
@@ -84,13 +84,13 @@ func dnsReadConfig(filename string) *dnsConfig {
 						n = 15
 					}
 					conf.ndots = n
-				case hasPrefix(s, "timeout:"):
+				case stringslite.HasPrefix(s, "timeout:"):
 					n, _, _ := dtoi(s[8:])
 					if n < 1 {
 						n = 1
 					}
 					conf.timeout = time.Duration(n) * time.Second
-				case hasPrefix(s, "attempts:"):
+				case stringslite.HasPrefix(s, "attempts:"):
 					n, _, _ := dtoi(s[9:])
 					if n < 1 {
 						n = 1
@@ -118,6 +118,8 @@ func dnsReadConfig(filename string) *dnsConfig {
 				case s == "edns0":
 					// We use EDNS by default.
 					// Ignore this option.
+				case s == "no-reload":
+					conf.noReload = true
 				default:
 					conf.unknownOpt = true
 				}
@@ -152,10 +154,6 @@ func dnsDefaultSearch() []string {
 		return []string{ensureRooted(hn[i+1:])}
 	}
 	return nil
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 func ensureRooted(s string) string {

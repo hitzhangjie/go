@@ -8,12 +8,24 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+	_ "unsafe"
 )
 
-var (
-	defaultNS   = []string{"127.0.0.1:53", "[::1]:53"}
-	getHostname = os.Hostname // variable for testing
-)
+// defaultNS is the default name servers to use in the absence of DNS configuration.
+//
+// defaultNS should be an internal detail,
+// but widely used packages access it using linkname.
+// Notable members of the hall of shame include:
+//   - github.com/pojntfx/hydrapp/hydrapp
+//   - github.com/mtibben/androiddnsfix
+//
+// Do not remove or change the type signature.
+// See go.dev/issue/67401.
+//
+//go:linkname defaultNS
+var defaultNS = []string{"127.0.0.1:53", "[::1]:53"}
+
+var getHostname = os.Hostname // variable for testing
 
 type dnsConfig struct {
 	servers       []string      // server addresses (in host:port form) to use
@@ -30,6 +42,7 @@ type dnsConfig struct {
 	singleRequest bool          // use sequential A and AAAA queries instead of parallel queries
 	useTCP        bool          // force usage of TCP for DNS resolutions
 	trustAD       bool          // add AD flag to queries
+	noReload      bool          // do not check for config file updates
 }
 
 // serverOffset returns an offset that can be used to determine

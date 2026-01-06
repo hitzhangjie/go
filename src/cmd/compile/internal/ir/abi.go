@@ -50,8 +50,8 @@ func setupTextLSym(f *Func, flag int) {
 	if f.Pragma&Nosplit != 0 {
 		flag |= obj.NOSPLIT
 	}
-	if f.ReflectMethod() {
-		flag |= obj.REFLECTMETHOD
+	if f.IsPackageInit() {
+		flag |= obj.PKGINIT
 	}
 
 	// Clumsy but important.
@@ -74,5 +74,5 @@ func setupTextLSym(f *Func, flag int) {
 		}
 	}
 
-	base.Ctxt.InitTextSym(f.LSym, flag)
+	base.Ctxt.InitTextSym(f.LSym, flag, f.Pos())
 }

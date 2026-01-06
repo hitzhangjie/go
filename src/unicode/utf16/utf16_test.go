@@ -5,7 +5,8 @@
 package utf16_test
 
 import (
-	"reflect"
+	"internal/testenv"
+	"slices"
 	"testing"
 	"unicode"
 	. "unicode/utf16"
@@ -18,6 +19,26 @@ func TestConstants(t *testing.T) {
 	}
 	if ReplacementChar != unicode.ReplacementChar {
 		t.Errorf("utf16.replacementChar is wrong: %x should be %x", ReplacementChar, unicode.ReplacementChar)
+	}
+}
+
+func TestRuneLen(t *testing.T) {
+	for _, tt := range []struct {
+		r      rune
+		length int
+	}{
+		{0, 1},
+		{Surr1 - 1, 1},
+		{Surr3, 1},
+		{SurrSelf - 1, 1},
+		{SurrSelf, 2},
+		{MaxRune, 2},
+		{MaxRune + 1, -1},
+		{-1, -1},
+	} {
+		if length := RuneLen(tt.r); length != tt.length {
+			t.Errorf("RuneLen(%#U) = %d, want %d", tt.r, length, tt.length)
+		}
 	}
 }
 
@@ -37,7 +58,7 @@ var encodeTests = []encodeTest{
 func TestEncode(t *testing.T) {
 	for _, tt := range encodeTests {
 		out := Encode(tt.in)
-		if !reflect.DeepEqual(out, tt.out) {
+		if !slices.Equal(out, tt.out) {
 			t.Errorf("Encode(%x) = %x; want %x", tt.in, out, tt.out)
 		}
 	}
@@ -49,7 +70,7 @@ func TestAppendRune(t *testing.T) {
 		for _, u := range tt.in {
 			out = AppendRune(out, u)
 		}
-		if !reflect.DeepEqual(out, tt.out) {
+		if !slices.Equal(out, tt.out) {
 			t.Errorf("AppendRune(%x) = %x; want %x", tt.in, out, tt.out)
 		}
 	}
@@ -103,10 +124,26 @@ var decodeTests = []decodeTest{
 	{[]uint16{0xdfff}, []rune{0xfffd}},
 }
 
+func TestAllocationsDecode(t *testing.T) {
+	testenv.SkipIfOptimizationOff(t)
+
+	for _, tt := range decodeTests {
+		allocs := testing.AllocsPerRun(10, func() {
+			out := Decode(tt.in)
+			if out == nil {
+				t.Errorf("Decode(%x) = nil", tt.in)
+			}
+		})
+		if allocs > 0 {
+			t.Errorf("Decode allocated %v times", allocs)
+		}
+	}
+}
+
 func TestDecode(t *testing.T) {
 	for _, tt := range decodeTests {
 		out := Decode(tt.in)
-		if !reflect.DeepEqual(out, tt.out) {
+		if !slices.Equal(out, tt.out) {
 			t.Errorf("Decode(%x) = %x; want %x", tt.in, out, tt.out)
 		}
 	}

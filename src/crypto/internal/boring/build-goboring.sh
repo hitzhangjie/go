@@ -55,11 +55,15 @@ BEGIN {
 /\/\*unchecked/ { next }
 
 # Check enum values.
-!enum && $1 == "enum" && $NF == "{" {
+!enum && ($1 == "enum" || $2 == "enum") && $NF == "{" {
 	enum = 1
 	next
 }
 enum && $1 == "};" {
+	enum = 0
+	next
+}
+enum && /^}.*;$/ {
 	enum = 0
 	next
 }
@@ -111,14 +115,14 @@ EOF
 cat >boringh.awk <<'EOF'
 /^\/\/ #include/ {sub(/\/\//, ""); print > "goboringcrypto0.h"; next}
 /typedef struct|enum ([a-z_]+ )?{|^[ \t]/ {print >"goboringcrypto1.h";next}
-{gsub(/GO_/, ""); gsub(/enum go_/, "enum "); print >"goboringcrypto1.h"}
+{gsub(/GO_/, ""); gsub(/enum go_/, "enum "); gsub(/go_point_conv/, "point_conv"); print >"goboringcrypto1.h"}
 EOF
 
 awk -f boringx.awk goboringcrypto.h # writes goboringcrypto.x
 awk -f boringh.awk goboringcrypto.h # writes goboringcrypto[01].h
 
 ls -l ../boringssl/include
-clang++ -std=c++11 -fPIC -I../boringssl/include -O2 -o a.out  goboringcrypto.cc
+clang++ -fPIC -I../boringssl/include -O2 -o a.out  goboringcrypto.cc
 ./a.out || exit 2
 
 # clang implements u128 % u128 -> u128 by calling __umodti3,

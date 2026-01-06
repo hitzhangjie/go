@@ -7,6 +7,7 @@ package pprof
 import (
 	"errors"
 	"internal/syscall/windows"
+	"os"
 	"syscall"
 )
 
@@ -42,10 +43,14 @@ func (b *profileBuilder) readMapping() {
 	}
 }
 
-func readMainModuleMapping() (start, end uint64, err error) {
+func readMainModuleMapping() (start, end uint64, exe, buildID string, err error) {
+	exe, err = os.Executable()
+	if err != nil {
+		return 0, 0, "", "", err
+	}
 	snap, err := createModuleSnapshot()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", "", err
 	}
 	defer func() { _ = syscall.CloseHandle(snap) }()
 
@@ -53,17 +58,16 @@ func readMainModuleMapping() (start, end uint64, err error) {
 	module.Size = uint32(windows.SizeofModuleEntry32)
 	err = windows.Module32First(snap, &module)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, "", "", err
 	}
 
-	return uint64(module.ModBaseAddr), uint64(module.ModBaseAddr) + uint64(module.ModBaseSize), nil
+	return uint64(module.ModBaseAddr), uint64(module.ModBaseAddr) + uint64(module.ModBaseSize), exe, peBuildID(exe), nil
 }
 
 func createModuleSnapshot() (syscall.Handle, error) {
 	for {
 		snap, err := syscall.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE|windows.TH32CS_SNAPMODULE32, uint32(syscall.Getpid()))
-		var errno syscall.Errno
-		if err != nil && errors.As(err, &errno) && errno == windows.ERROR_BAD_LENGTH {
+		if errno, ok := errors.AsType[syscall.Errno](err); ok && errno == windows.ERROR_BAD_LENGTH {
 			// When CreateToolhelp32Snapshot(SNAPMODULE|SNAPMODULE32, ...) fails
 			// with ERROR_BAD_LENGTH then it should be retried until it succeeds.
 			continue

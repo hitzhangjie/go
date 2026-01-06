@@ -5,10 +5,12 @@
 package scanner
 
 import (
+	"fmt"
 	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -351,7 +353,7 @@ func checkSemi(t *testing.T, input, want string, mode Mode) {
 			break
 		}
 		if tok == token.SEMICOLON && lit != ";" {
-			// Artifical semicolon:
+			// Artificial semicolon:
 			// assert that position is EOF or that of a newline.
 			off := file.Offset(pos)
 			if off != len(input) && input[off] != '\n' {
@@ -813,11 +815,39 @@ var errors = []struct {
 	{`"` + "abc\ufeffdef" + `"`, token.STRING, 4, `"` + "abc\ufeffdef" + `"`, "illegal byte order mark"}, // only first BOM is ignored
 	{"abc\x00def", token.IDENT, 3, "abc", "illegal character NUL"},
 	{"abc\x00", token.IDENT, 3, "abc", "illegal character NUL"},
+	{"“abc”", token.ILLEGAL, 0, "abc", `curly quotation mark '“' (use neutral '"')`},
 }
 
 func TestScanErrors(t *testing.T) {
 	for _, e := range errors {
 		checkError(t, e.src, e.tok, e.pos, e.lit, e.err)
+	}
+}
+
+func TestUTF16(t *testing.T) {
+	// This test doesn't fit within TestScanErrors because
+	// the latter assumes that there was only one error.
+	for _, src := range []string{
+		"\xfe\xff\x00p\x00a\x00c\x00k\x00a\x00g\x00e\x00 \x00p", // BOM + "package p" encoded as UTF-16 BE
+		"\xff\xfep\x00a\x00c\x00k\x00a\x00g\x00e\x00 \x00p\x00", // BOM + "package p" encoded as UTF-16 LE
+	} {
+		var got []string
+		eh := func(posn token.Position, msg string) {
+			got = append(got, fmt.Sprintf("#%d: %s", posn.Offset, msg))
+		}
+		var sc Scanner
+		sc.Init(fset.AddFile("", fset.Base(), len(src)), []byte(src), eh, 0)
+		sc.Scan()
+
+		// We expect two errors:
+		// one from the decoder, one from the scanner.
+		want := []string{
+			"#0: illegal UTF-8 encoding (got UTF-16)",
+			"#0: illegal character U+FFFD '�'",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("Scan(%q) returned errors %q, want %q", src, got, want)
+		}
 	}
 }
 

@@ -6,20 +6,21 @@ package ssa
 
 import (
 	"cmd/compile/internal/types"
-	"sort"
+	"cmp"
+	"slices"
 )
 
 // decompose converts phi ops on compound builtin types into phi
 // ops on simple types, then invokes rewrite rules to decompose
 // other ops on those types.
-func decomposeBuiltIn(f *Func) {
+func decomposeBuiltin(f *Func) {
 	// Decompose phis
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
 			if v.Op != OpPhi {
 				continue
 			}
-			decomposeBuiltInPhi(v)
+			decomposeBuiltinPhi(v)
 		}
 	}
 
@@ -99,7 +100,7 @@ func decomposeBuiltIn(f *Func) {
 			}
 		case t.IsFloat():
 			// floats are never decomposed, even ones bigger than RegSize
-		case t.Size() > f.Config.RegSize:
+		case t.Size() > f.Config.RegSize && !t.IsSIMD():
 			f.Fatalf("undecomposed named type %s %v", name, t)
 		}
 	}
@@ -120,7 +121,7 @@ func maybeAppend2(f *Func, ss []*LocalSlot, s1, s2 *LocalSlot) []*LocalSlot {
 	return maybeAppend(f, maybeAppend(f, ss, s1), s2)
 }
 
-func decomposeBuiltInPhi(v *Value) {
+func decomposeBuiltinPhi(v *Value) {
 	switch {
 	case v.Type.IsInteger() && v.Type.Size() > v.Block.Func.Config.RegSize:
 		decomposeInt64Phi(v)
@@ -134,7 +135,7 @@ func decomposeBuiltInPhi(v *Value) {
 		decomposeInterfacePhi(v)
 	case v.Type.IsFloat():
 		// floats are never decomposed, even ones bigger than RegSize
-	case v.Type.Size() > v.Block.Func.Config.RegSize:
+	case v.Type.Size() > v.Block.Func.Config.RegSize && !v.Type.IsSIMD():
 		v.Fatalf("%v undecomposed type %v", v, v.Type)
 	}
 }
@@ -247,7 +248,7 @@ func decomposeUser(f *Func) {
 	for _, name := range f.Names {
 		t := name.Type
 		switch {
-		case t.IsStruct():
+		case isStructNotSIMD(t):
 			newNames = decomposeUserStructInto(f, name, newNames)
 		case t.IsArray():
 			newNames = decomposeUserArrayInto(f, name, newNames)
@@ -292,7 +293,7 @@ func decomposeUserArrayInto(f *Func, name *LocalSlot, slots []*LocalSlot) []*Loc
 
 	if t.Elem().IsArray() {
 		return decomposeUserArrayInto(f, elemName, slots)
-	} else if t.Elem().IsStruct() {
+	} else if isStructNotSIMD(t.Elem()) {
 		return decomposeUserStructInto(f, elemName, slots)
 	}
 
@@ -312,16 +313,15 @@ func decomposeUserStructInto(f *Func, name *LocalSlot, slots []*LocalSlot) []*Lo
 		fnames = append(fnames, fs)
 		// arrays and structs will be decomposed further, so
 		// there's no need to record a name
-		if !fs.Type.IsArray() && !fs.Type.IsStruct() {
+		if !fs.Type.IsArray() && !isStructNotSIMD(fs.Type) {
 			slots = maybeAppend(f, slots, fs)
 		}
 	}
 
-	makeOp := StructMakeOp(n)
 	var keep []*Value
 	// create named values for each struct field
 	for _, v := range f.NamedValues[*name] {
-		if v.Op != makeOp {
+		if v.Op != OpStructMake || len(v.Args) != n {
 			keep = append(keep, v)
 			continue
 		}
@@ -339,7 +339,7 @@ func decomposeUserStructInto(f *Func, name *LocalSlot, slots []*LocalSlot) []*Lo
 	// now that this f.NamedValues contains values for the struct
 	// fields, recurse into nested structs
 	for i := 0; i < n; i++ {
-		if name.Type.FieldType(i).IsStruct() {
+		if isStructNotSIMD(name.Type.FieldType(i)) {
 			slots = decomposeUserStructInto(f, fnames[i], slots)
 			delete(f.NamedValues, *fnames[i])
 		} else if name.Type.FieldType(i).IsArray() {
@@ -351,7 +351,7 @@ func decomposeUserStructInto(f *Func, name *LocalSlot, slots []*LocalSlot) []*Lo
 }
 func decomposeUserPhi(v *Value) {
 	switch {
-	case v.Type.IsStruct():
+	case isStructNotSIMD(v.Type):
 		decomposeStructPhi(v)
 	case v.Type.IsArray():
 		decomposeArrayPhi(v)
@@ -372,7 +372,7 @@ func decomposeStructPhi(v *Value) {
 			fields[i].AddArg(a.Block.NewValue1I(v.Pos, OpStructSelect, t.FieldType(i), int64(i), a))
 		}
 	}
-	v.reset(StructMakeOp(n))
+	v.reset(OpStructMake)
 	v.AddArgs(fields[:n]...)
 
 	// Recursively decompose phis for each field.
@@ -407,24 +407,6 @@ func decomposeArrayPhi(v *Value) {
 // can have and still be SSAable.
 const MaxStruct = 4
 
-// StructMakeOp returns the opcode to construct a struct with the
-// given number of fields.
-func StructMakeOp(nf int) Op {
-	switch nf {
-	case 0:
-		return OpStructMake0
-	case 1:
-		return OpStructMake1
-	case 2:
-		return OpStructMake2
-	case 3:
-		return OpStructMake3
-	case 4:
-		return OpStructMake4
-	}
-	panic("too many fields in an SSAable struct")
-}
-
 type namedVal struct {
 	locIndex, valIndex int // f.NamedValues[f.Names[locIndex]][valIndex] = key
 }
@@ -433,12 +415,11 @@ type namedVal struct {
 // removes all values with OpInvalid, and re-sorts the list of Names.
 func deleteNamedVals(f *Func, toDelete []namedVal) {
 	// Arrange to delete from larger indices to smaller, to ensure swap-with-end deletion does not invalidate pending indices.
-	sort.Slice(toDelete, func(i, j int) bool {
-		if toDelete[i].locIndex != toDelete[j].locIndex {
-			return toDelete[i].locIndex > toDelete[j].locIndex
+	slices.SortFunc(toDelete, func(a, b namedVal) int {
+		if a.locIndex != b.locIndex {
+			return cmp.Compare(b.locIndex, a.locIndex)
 		}
-		return toDelete[i].valIndex > toDelete[j].valIndex
-
+		return cmp.Compare(b.valIndex, a.valIndex)
 	})
 
 	// Get rid of obsolete names
@@ -476,4 +457,8 @@ func deleteNamedVals(f *Func, toDelete []namedVal) {
 		}
 	}
 	f.Names = f.Names[:end]
+}
+
+func isStructNotSIMD(t *types.Type) bool {
+	return t.IsStruct() && !t.IsSIMD()
 }

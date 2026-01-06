@@ -2,7 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package macho implements access to Mach-O object files.
+/*
+Package macho implements access to Mach-O object files.
+
+# Security
+
+This package is not designed to be hardened against adversarial inputs, and is
+outside the scope of https://go.dev/security/policy. In particular, only basic
+validation is done when parsing object files. As such, care should be taken when
+parsing untrusted inputs, as parsing malformed files may consume significant
+resources, or cause panics.
+*/
 package macho
 
 // High level access to low level data structures.
@@ -187,7 +197,7 @@ func (e *FormatError) Error() string {
 	return msg
 }
 
-// Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
+// Open opens the named file using [os.Open] and prepares it for use as a Mach-O binary.
 func Open(name string) (*File, error) {
 	f, err := os.Open(name)
 	if err != nil {
@@ -202,8 +212,8 @@ func Open(name string) (*File, error) {
 	return ff, nil
 }
 
-// Close closes the File.
-// If the File was created using NewFile directly instead of Open,
+// Close closes the [File].
+// If the [File] was created using [NewFile] directly instead of [Open],
 // Close has no effect.
 func (f *File) Close() error {
 	var err error
@@ -214,7 +224,7 @@ func (f *File) Close() error {
 	return err
 }
 
-// NewFile creates a new File for accessing a Mach-O binary in an underlying reader.
+// NewFile creates a new [File] for accessing a Mach-O binary in an underlying reader.
 // The Mach-O binary is expected to start at position 0 in the ReaderAt.
 func NewFile(r io.ReaderAt) (*File, error) {
 	f := new(File)
@@ -253,7 +263,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := saferio.SliceCap((*Load)(nil), uint64(f.Ncmd))
+	c := saferio.SliceCap[Load](uint64(f.Ncmd))
 	if c < 0 {
 		return nil, &FormatError{offset, "too many load commands", nil}
 	}
@@ -313,8 +323,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
 			}
-			strtab := make([]byte, hdr.Strsize)
-			if _, err := r.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
+			strtab, err := saferio.ReadDataAt(r, uint64(hdr.Strsize), int64(hdr.Stroff))
+			if err != nil {
 				return nil, err
 			}
 			var symsz int
@@ -340,7 +350,9 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
 			}
-			if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
+			if f.Symtab == nil {
+				return nil, &FormatError{offset, "dynamic symbol table seen before any ordinary symbol table", nil}
+			} else if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"undefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym, len(f.Symtab.Syms)), nil}
@@ -349,8 +361,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
 			}
-			dat := make([]byte, hdr.Nindirectsyms*4)
-			if _, err := r.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
+			dat, err := saferio.ReadDataAt(r, uint64(hdr.Nindirectsyms)*4, int64(hdr.Indirectsymoff))
+			if err != nil {
 				return nil, err
 			}
 			x := make([]uint32, hdr.Nindirectsyms)
@@ -460,7 +472,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 
 func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *SymtabCmd, offset int64) (*Symtab, error) {
 	bo := f.ByteOrder
-	c := saferio.SliceCap((*Symbol)(nil), uint64(hdr.Nsyms))
+	c := saferio.SliceCap[Symbol](uint64(hdr.Nsyms))
 	if c < 0 {
 		return nil, &FormatError{offset, "too many symbols", nil}
 	}
@@ -598,15 +610,33 @@ func (f *File) Section(name string) *Section {
 // DWARF returns the DWARF debug information for the Mach-O file.
 func (f *File) DWARF() (*dwarf.Data, error) {
 	dwarfSuffix := func(s *Section) string {
+		sectname := s.Name
+		var pfx int
 		switch {
-		case strings.HasPrefix(s.Name, "__debug_"):
-			return s.Name[8:]
-		case strings.HasPrefix(s.Name, "__zdebug_"):
-			return s.Name[9:]
+		case strings.HasPrefix(sectname, "__debug_"):
+			pfx = 8
+		case strings.HasPrefix(sectname, "__zdebug_"):
+			pfx = 9
 		default:
 			return ""
 		}
-
+		// Mach-O executables truncate section names to 16 characters, mangling some DWARF sections.
+		// As of DWARFv5 these are the only problematic section names (see DWARFv5 Appendix G).
+		for _, longname := range []string{
+			"__debug_str_offsets",
+			"__zdebug_line_str",
+			"__zdebug_loclists",
+			"__zdebug_pubnames",
+			"__zdebug_pubtypes",
+			"__zdebug_rnglists",
+			"__zdebug_str_offsets",
+		} {
+			if sectname == longname[:16] {
+				sectname = longname
+				break
+			}
+		}
+		return sectname[pfx:]
 	}
 	sectionData := func(s *Section) ([]byte, error) {
 		b, err := s.Data()
@@ -689,15 +719,29 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 // referred to by the binary f that are expected to be
 // satisfied by other libraries at dynamic load time.
 func (f *File) ImportedSymbols() ([]string, error) {
-	if f.Dysymtab == nil || f.Symtab == nil {
+	if f.Symtab == nil {
 		return nil, &FormatError{0, "missing symbol table", nil}
 	}
 
 	st := f.Symtab
 	dt := f.Dysymtab
 	var all []string
-	for _, s := range st.Syms[dt.Iundefsym : dt.Iundefsym+dt.Nundefsym] {
-		all = append(all, s.Name)
+	if dt != nil {
+		for _, s := range st.Syms[dt.Iundefsym : dt.Iundefsym+dt.Nundefsym] {
+			all = append(all, s.Name)
+		}
+	} else {
+		// From Darwin's include/mach-o/nlist.h
+		const (
+			N_TYPE = 0x0e
+			N_UNDF = 0x0
+			N_EXT  = 0x01
+		)
+		for _, s := range st.Syms {
+			if s.Type&N_TYPE == N_UNDF && s.Type&N_EXT != 0 {
+				all = append(all, s.Name)
+			}
+		}
 	}
 	return all, nil
 }

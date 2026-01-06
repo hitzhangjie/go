@@ -10,12 +10,12 @@ import (
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"internal/testenv"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -67,11 +67,11 @@ func TestECDH(t *testing.T) {
 			t.Error("encoded and decoded private keys are different")
 		}
 
-		bobSecret, err := curve.ECDH(bobKey, aliceKey.PublicKey())
+		bobSecret, err := bobKey.ECDH(aliceKey.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
-		aliceSecret, err := curve.ECDH(aliceKey, bobKey.PublicKey())
+		aliceSecret, err := aliceKey.ECDH(bobKey.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -168,12 +168,13 @@ func TestVectors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		secret, err := curve.ECDH(key, peer)
+		secret, err := key.ECDH(peer)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(secret, hexDecode(t, v.SharedSecret)) {
-			t.Error("shared secret does not match")
+			t.Errorf("shared secret does not match: %x %x %s %x", secret, sha256.Sum256(secret), v.SharedSecret,
+				sha256.Sum256(hexDecode(t, v.SharedSecret)))
 		}
 	})
 }
@@ -191,6 +192,170 @@ func TestString(t *testing.T) {
 		s := fmt.Sprintf("%s", curve)
 		if s[:1] != "P" && s[:1] != "X" {
 			t.Errorf("unexpected Curve string encoding: %q", s)
+		}
+	})
+}
+
+func TestX25519Failure(t *testing.T) {
+	identity := hexDecode(t, "0000000000000000000000000000000000000000000000000000000000000000")
+	lowOrderPoint := hexDecode(t, "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800")
+	randomScalar := make([]byte, 32)
+	rand.Read(randomScalar)
+
+	t.Run("identity point", func(t *testing.T) { testX25519Failure(t, randomScalar, identity) })
+	t.Run("low order point", func(t *testing.T) { testX25519Failure(t, randomScalar, lowOrderPoint) })
+}
+
+func testX25519Failure(t *testing.T, private, public []byte) {
+	priv, err := ecdh.X25519().NewPrivateKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ecdh.X25519().NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := priv.ECDH(pub)
+	if err == nil {
+		t.Error("expected ECDH error")
+	}
+	if secret != nil {
+		t.Errorf("unexpected ECDH output: %x", secret)
+	}
+}
+
+var invalidPrivateKeys = map[ecdh.Curve][]string{
+	ecdh.P256(): {
+		// Bad lengths.
+		"",
+		"01",
+		"01010101010101010101010101010101010101010101010101010101010101",
+		"000101010101010101010101010101010101010101010101010101010101010101",
+		strings.Repeat("01", 200),
+		// Zero.
+		"0000000000000000000000000000000000000000000000000000000000000000",
+		// Order of the curve and above.
+		"ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+		"ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632552",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+	},
+	ecdh.P384(): {
+		// Bad lengths.
+		"",
+		"01",
+		"0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+		"00010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+		strings.Repeat("01", 200),
+		// Zero.
+		"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		// Order of the curve and above.
+		"ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52974",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+	},
+	ecdh.P521(): {
+		// Bad lengths.
+		"",
+		"01",
+		"0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+		"00010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+		strings.Repeat("01", 200),
+		// Zero.
+		"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		// Order of the curve and above.
+		"01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+		"01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e9138640a",
+		"11fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+		"03fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff4a30d0f077e5f2cd6ff980291ee134ba0776b937113388f5d76df6e3d2270c812",
+	},
+	ecdh.X25519(): {
+		// X25519 only rejects bad lengths.
+		"",
+		"01",
+		"01010101010101010101010101010101010101010101010101010101010101",
+		"000101010101010101010101010101010101010101010101010101010101010101",
+		strings.Repeat("01", 200),
+	},
+}
+
+func TestNewPrivateKey(t *testing.T) {
+	testAllCurves(t, func(t *testing.T, curve ecdh.Curve) {
+		for _, input := range invalidPrivateKeys[curve] {
+			k, err := curve.NewPrivateKey(hexDecode(t, input))
+			if err == nil {
+				t.Errorf("unexpectedly accepted %q", input)
+			} else if k != nil {
+				t.Error("PrivateKey was not nil on error")
+			} else if strings.Contains(err.Error(), "boringcrypto") {
+				t.Errorf("boringcrypto error leaked out: %v", err)
+			}
+		}
+	})
+}
+
+var invalidPublicKeys = map[ecdh.Curve][]string{
+	ecdh.P256(): {
+		// Bad lengths.
+		"",
+		"04",
+		strings.Repeat("04", 200),
+		// Infinity.
+		"00",
+		// Compressed encodings.
+		"036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+		"02e2534a3532d08fbba02dde659ee62bd0031fe2db785596ef509302446b030852",
+		// Points not on the curve.
+		"046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f6",
+		"0400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		// Non-canonical encoding.
+		"04ffffffff00000001000000000000000000000001000000000000000000000004ba6dbc4555a7e7fa016ec431667e8521ee35afc49b265c3accbea3f7cdb70433",
+	},
+	ecdh.P384(): {
+		// Bad lengths.
+		"",
+		"04",
+		strings.Repeat("04", 200),
+		// Infinity.
+		"00",
+		// Compressed encodings.
+		"03aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
+		"0208d999057ba3d2d969260045c55b97f089025959a6f434d651d207d19fb96e9e4fe0e86ebe0e64f85b96a9c75295df61",
+		// Points not on the curve.
+		"04aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab73617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e60",
+		"04000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		// Non-canonical encoding.
+		"04fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff000000000000000100000001732152442fb6ee5c3e6ce1d920c059bc623563814d79042b903ce60f1d4487fccd450a86da03f3e6ed525d02017bfdb3",
+	},
+	ecdh.P521(): {
+		// Bad lengths.
+		"",
+		"04",
+		strings.Repeat("04", 200),
+		// Infinity.
+		"00",
+		// Compressed encodings.
+		"030035b5df64ae2ac204c354b483487c9070cdc61c891c5ff39afc06c5d55541d3ceac8659e24afe3d0750e8b88e9f078af066a1d5025b08e5a5e2fbc87412871902f3",
+		"0200c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+		// Points not on the curve.
+		"0400c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16651",
+		"04000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+		// Non-canonical encoding.
+		"0402000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100d9254fdf800496acb33790b103c5ee9fac12832fe546c632225b0f7fce3da4574b1a879b623d722fa8fc34d5fc2a8731aad691a9a8bb8b554c95a051d6aa505acf",
+	},
+	ecdh.X25519(): {},
+}
+
+func TestNewPublicKey(t *testing.T) {
+	testAllCurves(t, func(t *testing.T, curve ecdh.Curve) {
+		for _, input := range invalidPublicKeys[curve] {
+			k, err := curve.NewPublicKey(hexDecode(t, input))
+			if err == nil {
+				t.Errorf("unexpectedly accepted %q", input)
+			} else if k != nil {
+				t.Error("PublicKey was not nil on error")
+			} else if strings.Contains(err.Error(), "boringcrypto") {
+				t.Errorf("boringcrypto error leaked out: %v", err)
+			}
 		}
 	})
 }
@@ -232,7 +397,7 @@ func BenchmarkECDH(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			secret, err := curve.ECDH(key, peerPubKey)
+			secret, err := key.ECDH(peerPubKey)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -252,9 +417,7 @@ type zr struct{}
 
 // Read replaces the contents of dst with zeros. It is safe for concurrent use.
 func (zr) Read(dst []byte) (n int, err error) {
-	for i := range dst {
-		dst[i] = 0
-	}
+	clear(dst)
 	return len(dst), nil
 }
 
@@ -265,14 +428,15 @@ package main
 import "crypto/ecdh"
 import "crypto/rand"
 func main() {
-	curve := ecdh.P384()
+	// Use P-256, since that's what the always-enabled CAST uses.
+	curve := ecdh.P256()
 	key, err := curve.GenerateKey(rand.Reader)
 	if err != nil { panic(err) }
 	_, err = curve.NewPublicKey(key.PublicKey().Bytes())
 	if err != nil { panic(err) }
 	_, err = curve.NewPrivateKey(key.Bytes())
 	if err != nil { panic(err) }
-	_, err = curve.ECDH(key, key.PublicKey())
+	_, err = key.ECDH(key.PublicKey())
 	if err != nil { panic(err) }
 	println("OK")
 }
@@ -285,7 +449,6 @@ func TestLinker(t *testing.T) {
 	if testing.Short() {
 		t.Skip("test requires running 'go build'")
 	}
-	testenv.MustHaveGoBuild(t)
 
 	dir := t.TempDir()
 	hello := filepath.Join(dir, "hello.go")
@@ -295,35 +458,70 @@ func TestLinker(t *testing.T) {
 	}
 
 	run := func(args ...string) string {
-		cmd := exec.Command(args[0], args[1:]...)
+		cmd := testenv.Command(t, args[0], args[1:]...)
 		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
+		out, err := testenv.CleanCmdEnv(cmd).CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", args, err, string(out))
 		}
 		return string(out)
 	}
 
-	goBin := testenv.GoToolPath(t)
-	run(goBin, "build", "-o", "hello.exe", "hello.go")
+	run(testenv.GoToolPath(t), "build", "-o", "hello.exe", "hello.go")
 	if out := run("./hello.exe"); out != "OK\n" {
 		t.Error("unexpected output:", out)
 	}
 
 	// List all text symbols under crypto/... and make sure there are some for
-	// P384, but none for the other curves.
+	// P256, but none for the other curves.
 	var consistent bool
-	nm := run(goBin, "tool", "nm", "hello.exe")
+	nm := run(testenv.GoToolPath(t), "tool", "nm", "hello.exe")
 	for _, match := range regexp.MustCompile(`(?m)T (crypto/.*)$`).FindAllStringSubmatch(nm, -1) {
 		symbol := strings.ToLower(match[1])
-		if strings.Contains(symbol, "p384") {
+		if strings.Contains(symbol, "p256") {
 			consistent = true
 		}
-		if strings.Contains(symbol, "p224") || strings.Contains(symbol, "p256") || strings.Contains(symbol, "p521") {
-			t.Errorf("unexpected symbol in program using only ecdh.P384: %s", match[1])
+		if strings.Contains(symbol, "p224") || strings.Contains(symbol, "p384") || strings.Contains(symbol, "p521") {
+			t.Errorf("unexpected symbol in program using only ecdh.P256: %s", match[1])
 		}
 	}
 	if !consistent {
-		t.Error("no P384 symbols found in program using ecdh.P384, test is broken")
+		t.Error("no P256 symbols found in program using ecdh.P256, test is broken")
+	}
+}
+
+func TestMismatchedCurves(t *testing.T) {
+	curves := []struct {
+		name  string
+		curve ecdh.Curve
+	}{
+		{"P256", ecdh.P256()},
+		{"P384", ecdh.P384()},
+		{"P521", ecdh.P521()},
+		{"X25519", ecdh.X25519()},
+	}
+
+	for _, privCurve := range curves {
+		priv, err := privCurve.curve.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate test key: %s", err)
+		}
+
+		for _, pubCurve := range curves {
+			if privCurve == pubCurve {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/%s", privCurve.name, pubCurve.name), func(t *testing.T) {
+				pub, err := pubCurve.curve.GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatalf("failed to generate test key: %s", err)
+				}
+				expected := "crypto/ecdh: private key and public key curves do not match"
+				_, err = priv.ECDH(pub.PublicKey())
+				if err.Error() != expected {
+					t.Fatalf("unexpected error: want %q, got %q", expected, err)
+				}
+			})
+		}
 	}
 }

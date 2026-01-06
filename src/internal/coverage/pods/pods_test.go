@@ -5,8 +5,8 @@
 package pods_test
 
 import (
-	"crypto/md5"
 	"fmt"
+	"hash/fnv"
 	"internal/coverage"
 	"internal/coverage/pods"
 	"os"
@@ -35,15 +35,18 @@ func TestPodCollection(t *testing.T) {
 	}
 
 	mkmeta := func(dir string, tag string) string {
-		hash := md5.Sum([]byte(tag))
+		h := fnv.New128a()
+		h.Write([]byte(tag))
+		hash := h.Sum(nil)
 		fn := fmt.Sprintf("%s.%x", coverage.MetaFilePref, hash)
 		return mkfile(dir, fn)
 	}
 
-	mkcounter := func(dir string, tag string, nt int) string {
-		hash := md5.Sum([]byte(tag))
-		dummyPid := int(42)
-		fn := fmt.Sprintf(coverage.CounterFileTempl, coverage.CounterFilePref, hash, dummyPid, nt)
+	mkcounter := func(dir string, tag string, nt int, pid int) string {
+		h := fnv.New128a()
+		h.Write([]byte(tag))
+		hash := h.Sum(nil)
+		fn := fmt.Sprintf(coverage.CounterFileTempl, coverage.CounterFilePref, hash, pid, nt)
 		return mkfile(dir, fn)
 	}
 
@@ -76,18 +79,18 @@ func TestPodCollection(t *testing.T) {
 
 	// Add a meta-data file with two counter files to first dir.
 	mkmeta(o1, "m1")
-	mkcounter(o1, "m1", 1)
-	mkcounter(o1, "m1", 2)
-	mkcounter(o1, "m1", 2)
+	mkcounter(o1, "m1", 1, 42)
+	mkcounter(o1, "m1", 2, 41)
+	mkcounter(o1, "m1", 2, 40)
 
 	// Add a counter file with no associated meta file.
-	mkcounter(o1, "orphan", 9)
+	mkcounter(o1, "orphan", 9, 39)
 
 	// Add a meta-data file with three counter files to second dir.
 	mkmeta(o2, "m2")
-	mkcounter(o2, "m2", 1)
-	mkcounter(o2, "m2", 2)
-	mkcounter(o2, "m2", 3)
+	mkcounter(o2, "m2", 1, 38)
+	mkcounter(o2, "m2", 2, 37)
+	mkcounter(o2, "m2", 3, 36)
 
 	// Add a duplicate of the first meta-file and a corresponding
 	// counter file to the second dir. This is intended to capture
@@ -95,7 +98,7 @@ func TestPodCollection(t *testing.T) {
 	// coverage-instrumented binary, but with the output files
 	// sent to separate directories.
 	mkmeta(o2, "m1")
-	mkcounter(o2, "m1", 11)
+	mkcounter(o2, "m1", 11, 35)
 
 	// Collect pods.
 	podlist, err := pods.CollectPods([]string{o1, o2}, true)
@@ -113,15 +116,16 @@ func TestPodCollection(t *testing.T) {
 	}
 
 	expected := []string{
-		`o1/covmeta.ae7be26cdaa742ca148068d5ac90eaca [
-o1/covcounters.ae7be26cdaa742ca148068d5ac90eaca.42.1 o:0
-o1/covcounters.ae7be26cdaa742ca148068d5ac90eaca.42.2 o:0
-o2/covcounters.ae7be26cdaa742ca148068d5ac90eaca.42.11 o:1
+		`o1/covmeta.0880952782ab1be95aa0733055a4d06b [
+o1/covcounters.0880952782ab1be95aa0733055a4d06b.40.2 o:0
+o1/covcounters.0880952782ab1be95aa0733055a4d06b.41.2 o:0
+o1/covcounters.0880952782ab1be95aa0733055a4d06b.42.1 o:0
+o2/covcounters.0880952782ab1be95aa0733055a4d06b.35.11 o:1
 ]`,
-		`o2/covmeta.aaf2f89992379705dac844c0a2a1d45f [
-o2/covcounters.aaf2f89992379705dac844c0a2a1d45f.42.1 o:1
-o2/covcounters.aaf2f89992379705dac844c0a2a1d45f.42.2 o:1
-o2/covcounters.aaf2f89992379705dac844c0a2a1d45f.42.3 o:1
+		`o2/covmeta.0880952783ab1be95aa0733055a4d1a6 [
+o2/covcounters.0880952783ab1be95aa0733055a4d1a6.36.3 o:1
+o2/covcounters.0880952783ab1be95aa0733055a4d1a6.37.2 o:1
+o2/covcounters.0880952783ab1be95aa0733055a4d1a6.38.1 o:1
 ]`,
 	}
 	for k, exp := range expected {
@@ -136,7 +140,7 @@ o2/covcounters.aaf2f89992379705dac844c0a2a1d45f.42.3 o:1
 		dbad := "/dev/null"
 		_, err = pods.CollectPods([]string{dbad}, true)
 		if err == nil {
-			t.Errorf("exected error due to unreadable dir")
+			t.Errorf("executed error due to unreadable dir")
 		}
 	}
 }

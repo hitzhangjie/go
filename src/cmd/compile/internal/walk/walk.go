@@ -5,12 +5,13 @@
 package walk
 
 import (
-	"errors"
 	"fmt"
+	"internal/abi"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/reflectdata"
+	"cmd/compile/internal/rttype"
 	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -19,10 +20,16 @@ import (
 
 // The constant is known to runtime.
 const tmpstringbufsize = 32
-const zeroValSize = 1024 // must match value of runtime/map.go:maxZero
 
 func Walk(fn *ir.Func) {
 	ir.CurFunc = fn
+
+	// Set and then clear a package-level cache of static values for this fn.
+	// (At some point, it might be worthwhile to have a walkState structure
+	// that gets passed everywhere where things like this can go.)
+	staticValues = findStaticValues(fn)
+	defer func() { staticValues = nil }()
+
 	errorsBefore := base.Errors()
 	order(fn)
 	if base.Errors() > errorsBefore {
@@ -34,20 +41,10 @@ func Walk(fn *ir.Func) {
 		ir.DumpList(s, ir.CurFunc.Body)
 	}
 
-	lno := base.Pos
-
-	base.Pos = lno
-	if base.Errors() > errorsBefore {
-		return
-	}
 	walkStmtList(ir.CurFunc.Body)
 	if base.Flag.W != 0 {
 		s := fmt.Sprintf("after walk %v", ir.CurFunc.Sym())
 		ir.DumpList(s, ir.CurFunc.Body)
-	}
-
-	if base.Flag.Cfg.Instrumenting {
-		instrument(fn)
 	}
 
 	// Eagerly compute sizes of all variables for SSA.
@@ -98,8 +95,6 @@ func convas(n *ir.AssignStmt, init *ir.Nodes) *ir.AssignStmt {
 	return n
 }
 
-var stop = errors.New("stop")
-
 func vmkcall(fn ir.Node, t *types.Type, init *ir.Nodes, va []ir.Node) *ir.CallExpr {
 	if init == nil {
 		base.Fatalf("mkcall with nil init: %v", fn)
@@ -144,42 +139,34 @@ func chanfn(name string, n int, t *types.Type) ir.Node {
 	if !t.IsChan() {
 		base.Fatalf("chanfn %v", t)
 	}
-	fn := typecheck.LookupRuntime(name)
 	switch n {
-	default:
-		base.Fatalf("chanfn %d", n)
 	case 1:
-		fn = typecheck.SubstArgTypes(fn, t.Elem())
+		return typecheck.LookupRuntime(name, t.Elem())
 	case 2:
-		fn = typecheck.SubstArgTypes(fn, t.Elem(), t.Elem())
+		return typecheck.LookupRuntime(name, t.Elem(), t.Elem())
 	}
-	return fn
+	base.Fatalf("chanfn %d", n)
+	return nil
 }
 
 func mapfn(name string, t *types.Type, isfat bool) ir.Node {
 	if !t.IsMap() {
 		base.Fatalf("mapfn %v", t)
 	}
-	fn := typecheck.LookupRuntime(name)
 	if mapfast(t) == mapslow || isfat {
-		fn = typecheck.SubstArgTypes(fn, t.Key(), t.Elem(), t.Key(), t.Elem())
-	} else {
-		fn = typecheck.SubstArgTypes(fn, t.Key(), t.Elem(), t.Elem())
+		return typecheck.LookupRuntime(name, t.Key(), t.Elem(), t.Key(), t.Elem())
 	}
-	return fn
+	return typecheck.LookupRuntime(name, t.Key(), t.Elem(), t.Elem())
 }
 
 func mapfndel(name string, t *types.Type) ir.Node {
 	if !t.IsMap() {
 		base.Fatalf("mapfn %v", t)
 	}
-	fn := typecheck.LookupRuntime(name)
 	if mapfast(t) == mapslow {
-		fn = typecheck.SubstArgTypes(fn, t.Key(), t.Elem(), t.Key())
-	} else {
-		fn = typecheck.SubstArgTypes(fn, t.Key(), t.Elem())
+		return typecheck.LookupRuntime(name, t.Key(), t.Elem(), t.Key())
 	}
-	return fn
+	return typecheck.LookupRuntime(name, t.Key(), t.Elem())
 }
 
 const (
@@ -204,8 +191,7 @@ var mapassign = mkmapnames("mapassign", "ptr")
 var mapdelete = mkmapnames("mapdelete", "")
 
 func mapfast(t *types.Type) int {
-	// Check runtime/map.go:maxElemSize before changing.
-	if t.Elem().Size() > 128 {
+	if t.Elem().Size() > abi.MapMaxElemBytes {
 		return mapslow
 	}
 	switch reflectdata.AlgType(t.Key()) {
@@ -278,8 +264,10 @@ func backingArrayPtrLen(n ir.Node) (ptr, length ir.Node) {
 	} else {
 		ptr.SetType(n.Type().Elem().PtrTo())
 	}
+	ptr.SetTypecheck(1)
 	length = ir.NewUnaryExpr(base.Pos, ir.OLEN, n)
 	length.SetType(types.Types[types.TINT])
+	length.SetTypecheck(1)
 	return ptr, length
 }
 
@@ -287,6 +275,15 @@ func backingArrayPtrLen(n ir.Node) (ptr, length ir.Node) {
 // function calls, which could clobber function call arguments/results
 // currently on the stack.
 func mayCall(n ir.Node) bool {
+	// This is intended to avoid putting constants
+	// into temporaries with the race detector (or other
+	// instrumentation) which interferes with simple
+	// "this is a constant" tests in ssagen.
+	// Also, it will generally lead to better code.
+	if n.Op() == ir.OLITERAL {
+		return false
+	}
+
 	// When instrumenting, any expression might require function calls.
 	if base.Flag.Cfg.Instrumenting {
 		return true
@@ -337,13 +334,17 @@ func mayCall(n ir.Node) bool {
 			n := n.(*ir.ConvExpr)
 			return ssagen.Arch.SoftFloat && (isSoftFloat(n.Type()) || isSoftFloat(n.X.Type()))
 
+		case ir.OMIN, ir.OMAX:
+			// string or float requires runtime call, see (*ssagen.state).minmax method.
+			return n.Type().IsString() || n.Type().IsFloat()
+
 		case ir.OLITERAL, ir.ONIL, ir.ONAME, ir.OLINKSYMOFFSET, ir.OMETHEXPR,
-			ir.OAND, ir.OANDNOT, ir.OLSH, ir.OOR, ir.ORSH, ir.OXOR, ir.OCOMPLEX, ir.OEFACE,
+			ir.OAND, ir.OANDNOT, ir.OLSH, ir.OOR, ir.ORSH, ir.OXOR, ir.OCOMPLEX, ir.OMAKEFACE,
 			ir.OADDR, ir.OBITNOT, ir.ONOT, ir.OPLUS,
 			ir.OCAP, ir.OIMAG, ir.OLEN, ir.OREAL,
 			ir.OCONVNOP, ir.ODOT,
 			ir.OCFUNC, ir.OIDATA, ir.OITAB, ir.OSPTR,
-			ir.OBYTES2STRTMP, ir.OGETG, ir.OGETCALLERPC, ir.OGETCALLERSP, ir.OSLICEHEADER, ir.OSTRINGHEADER:
+			ir.OBYTES2STRTMP, ir.OGETG, ir.OGETCALLERSP, ir.OSLICEHEADER, ir.OSTRINGHEADER:
 			// ok: operations that don't require function calls.
 			// Expand as needed.
 		}
@@ -355,8 +356,8 @@ func mayCall(n ir.Node) bool {
 // itabType loads the _type field from a runtime.itab struct.
 func itabType(itab ir.Node) ir.Node {
 	if itabTypeField == nil {
-		// runtime.itab's _type field
-		itabTypeField = runtimeField("_type", int64(types.PtrSize), types.NewPtr(types.Types[types.TUINT8]))
+		// internal/abi.ITab's Type field
+		itabTypeField = runtimeField("Type", rttype.ITab.OffsetOf("Type"), types.NewPtr(types.Types[types.TUINT8]))
 	}
 	return boundedDotPtr(base.Pos, itab, itabTypeField)
 }
@@ -400,4 +401,44 @@ func ifaceData(pos src.XPos, n ir.Node, t *types.Type) ir.Node {
 	ind.SetTypecheck(1)
 	ind.SetBounded(true)
 	return ind
+}
+
+// staticValue returns the earliest expression it can find that always
+// evaluates to n, with similar semantics to [ir.StaticValue].
+//
+// It only returns results for the ir.CurFunc being processed in [Walk],
+// including its closures, and uses a cache to reduce duplicative work.
+// It can return n or nil if it does not find an earlier expression.
+//
+// The current use case is reducing OCONVIFACE allocations, and hence
+// staticValue is currently only useful when given an *ir.ConvExpr.X as n.
+func staticValue(n ir.Node) ir.Node {
+	if staticValues == nil {
+		base.Fatalf("staticValues is nil. staticValue called outside of walk.Walk?")
+	}
+	return staticValues[n]
+}
+
+// staticValues is a cache of static values for use by staticValue.
+var staticValues map[ir.Node]ir.Node
+
+// findStaticValues returns a map of static values for fn.
+func findStaticValues(fn *ir.Func) map[ir.Node]ir.Node {
+	// We can't use an ir.ReassignOracle or ir.StaticValue in the
+	// middle of walk because they don't currently handle
+	// transformed assignments (e.g., will complain about 'RHS == nil').
+	// So we instead build this map to use in walk.
+	ro := &ir.ReassignOracle{}
+	ro.Init(fn)
+	m := make(map[ir.Node]ir.Node)
+	ir.Visit(fn, func(n ir.Node) {
+		if n.Op() == ir.OCONVIFACE {
+			x := n.(*ir.ConvExpr).X
+			v := ro.StaticValue(x)
+			if v != nil && v != x {
+				m[x] = v
+			}
+		}
+	})
+	return m
 }

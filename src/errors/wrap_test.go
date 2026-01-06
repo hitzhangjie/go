@@ -30,6 +30,7 @@ func TestIs(t *testing.T) {
 		match  bool
 	}{
 		{nil, nil, true},
+		{nil, err1, false},
 		{err1, nil, false},
 		{err1, err1, true},
 		{erra, err1, true},
@@ -238,6 +239,153 @@ func TestAsValidation(t *testing.T) {
 	}
 }
 
+func TestAsType(t *testing.T) {
+	var errT errorT
+	var errP *fs.PathError
+	type timeout interface {
+		Timeout() bool
+		error
+	}
+	_, errF := os.Open("non-existing")
+	poserErr := &poser{"oh no", nil}
+
+	testAsType(t,
+		nil,
+		errP,
+		false,
+	)
+	testAsType(t,
+		wrapped{"pitied the fool", errorT{"T"}},
+		errorT{"T"},
+		true,
+	)
+	testAsType(t,
+		errF,
+		errF,
+		true,
+	)
+	testAsType(t,
+		errT,
+		errP,
+		false,
+	)
+	testAsType(t,
+		wrapped{"wrapped", nil},
+		errT,
+		false,
+	)
+	testAsType(t,
+		&poser{"error", nil},
+		errorT{"poser"},
+		true,
+	)
+	testAsType(t,
+		&poser{"path", nil},
+		poserPathErr,
+		true,
+	)
+	testAsType(t,
+		poserErr,
+		poserErr,
+		true,
+	)
+	testAsType(t,
+		errors.New("err"),
+		timeout(nil),
+		false,
+	)
+	testAsType(t,
+		errF,
+		errF.(timeout),
+		true)
+	testAsType(t,
+		wrapped{"path error", errF},
+		errF.(timeout),
+		true,
+	)
+	testAsType(t,
+		multiErr{},
+		errT,
+		false,
+	)
+	testAsType(t,
+		multiErr{errors.New("a"), errorT{"T"}},
+		errorT{"T"},
+		true,
+	)
+	testAsType(t,
+		multiErr{errorT{"T"}, errors.New("a")},
+		errorT{"T"},
+		true,
+	)
+	testAsType(t,
+		multiErr{errorT{"a"}, errorT{"b"}},
+		errorT{"a"},
+		true,
+	)
+	testAsType(t,
+		multiErr{multiErr{errors.New("a"), errorT{"a"}}, errorT{"b"}},
+		errorT{"a"},
+		true,
+	)
+	testAsType(t,
+		multiErr{wrapped{"path error", errF}},
+		errF.(timeout),
+		true,
+	)
+	testAsType(t,
+		multiErr{nil},
+		errT,
+		false,
+	)
+}
+
+type compError interface {
+	comparable
+	error
+}
+
+func testAsType[E compError](t *testing.T, err error, want E, wantOK bool) {
+	t.Helper()
+	name := fmt.Sprintf("AsType[%T](Errorf(..., %v))", want, err)
+	t.Run(name, func(t *testing.T) {
+		got, gotOK := errors.AsType[E](err)
+		if gotOK != wantOK || got != want {
+			t.Fatalf("got %v, %t; want %v, %t", got, gotOK, want, wantOK)
+		}
+	})
+}
+
+func BenchmarkIs(b *testing.B) {
+	err1 := errors.New("1")
+	err2 := multiErr{multiErr{multiErr{err1, errorT{"a"}}, errorT{"b"}}}
+
+	for i := 0; i < b.N; i++ {
+		if !errors.Is(err2, err1) {
+			b.Fatal("Is failed")
+		}
+	}
+}
+
+func BenchmarkAs(b *testing.B) {
+	err := multiErr{multiErr{multiErr{errors.New("a"), errorT{"a"}}, errorT{"b"}}}
+	for i := 0; i < b.N; i++ {
+		var target errorT
+		if !errors.As(err, &target) {
+			b.Fatal("As failed")
+		}
+	}
+}
+
+func BenchmarkAsType(b *testing.B) {
+	err := multiErr{multiErr{multiErr{errors.New("a"), errorT{"a"}}, errorT{"b"}}}
+	for range b.N {
+		if _, ok := errors.AsType[errorT](err); !ok {
+			b.Fatal("AsType failed")
+		}
+	}
+}
+
 func TestUnwrap(t *testing.T) {
 	err1 := errors.New("1")
 	erra := wrapped{"wrap 2", err1}
@@ -287,41 +435,4 @@ func (errorUncomparable) Error() string {
 func (errorUncomparable) Is(target error) bool {
 	_, ok := target.(errorUncomparable)
 	return ok
-}
-
-func ExampleIs() {
-	if _, err := os.Open("non-existing"); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			fmt.Println("file does not exist")
-		} else {
-			fmt.Println(err)
-		}
-	}
-
-	// Output:
-	// file does not exist
-}
-
-func ExampleAs() {
-	if _, err := os.Open("non-existing"); err != nil {
-		var pathError *fs.PathError
-		if errors.As(err, &pathError) {
-			fmt.Println("Failed at path:", pathError.Path)
-		} else {
-			fmt.Println(err)
-		}
-	}
-
-	// Output:
-	// Failed at path: non-existing
-}
-
-func ExampleUnwrap() {
-	err1 := errors.New("error1")
-	err2 := fmt.Errorf("error2: [%w]", err1)
-	fmt.Println(err2)
-	fmt.Println(errors.Unwrap(err2))
-	// Output
-	// error2: [error1]
-	// error1
 }

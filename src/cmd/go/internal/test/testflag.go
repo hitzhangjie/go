@@ -6,11 +6,13 @@ package test
 
 import (
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/cmdflag"
 	"cmd/go/internal/work"
 	"errors"
 	"flag"
 	"fmt"
+	"internal/godebug"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,8 +27,10 @@ import (
 // our command line are for us, and some are for the test binary, and
 // some are for both.
 
+var gotestjsonbuildtext = godebug.New("gotestjsonbuildtext")
+
 func init() {
-	work.AddBuildFlags(CmdTest, work.OmitVFlag)
+	work.AddBuildFlags(CmdTest, work.OmitVFlag|work.OmitJSONFlag)
 
 	cf := CmdTest.Flag
 	cf.BoolVar(&testC, "c", false, "")
@@ -40,6 +44,7 @@ func init() {
 	// some of them so that cmd/go knows what to do with the test output, or knows
 	// to build the test in a way that supports the use of the flag.
 
+	cf.BoolVar(&testArtifacts, "artifacts", false, "")
 	cf.StringVar(&testBench, "bench", "", "")
 	cf.Bool("benchmem", false, "")
 	cf.String("benchtime", "", "")
@@ -48,8 +53,9 @@ func init() {
 	cf.Int("count", 0, "")
 	cf.String("cpu", "", "")
 	cf.StringVar(&testCPUProfile, "cpuprofile", "", "")
-	cf.Bool("failfast", false, "")
+	cf.BoolVar(&testFailFast, "failfast", false, "")
 	cf.StringVar(&testFuzz, "fuzz", "", "")
+	cf.Bool("fullpath", false, "")
 	cf.StringVar(&testList, "list", "", "")
 	cf.StringVar(&testMemProfile, "memprofile", "", "")
 	cf.String("memprofilerate", "", "")
@@ -60,15 +66,17 @@ func init() {
 	cf.String("run", "", "")
 	cf.Bool("short", false, "")
 	cf.String("skip", "", "")
-	cf.DurationVar(&testTimeout, "timeout", 10*time.Minute, "")
+	cf.DurationVar(&testTimeout, "timeout", 10*time.Minute, "") // known to cmd/dist
 	cf.String("fuzztime", "", "")
 	cf.String("fuzzminimizetime", "", "")
 	cf.StringVar(&testTrace, "trace", "", "")
-	cf.BoolVar(&testV, "v", false, "")
+	cf.Var(&testV, "v", "")
 	cf.Var(&testShuffle, "shuffle", "")
 
-	for name := range passFlagToTest {
-		cf.Var(cf.Lookup(name).Value, "test."+name, "")
+	for name, ok := range passFlagToTest {
+		if ok {
+			cf.Var(cf.Lookup(name).Value, "test."+name, "")
+		}
 	}
 }
 
@@ -142,7 +150,7 @@ func (f *vetFlag) Set(value string) error {
 
 	*f = vetFlag{explicit: true}
 	var single string
-	for _, arg := range strings.Split(value, ",") {
+	for arg := range strings.SplitSeq(value, ",") {
 		switch arg {
 		case "":
 			return fmt.Errorf("-vet argument contains empty list element")
@@ -253,7 +261,7 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 			break
 		}
 
-		if nf := (cmdflag.NonFlagError{}); errors.As(err, &nf) {
+		if nf, ok := errors.AsType[cmdflag.NonFlagError](err); ok {
 			if !inPkgList && packageNames != nil {
 				// We already saw the package list previously, and this argument is not
 				// a flag, so it — and everything after it — must be either a value for
@@ -288,7 +296,7 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 			inPkgList = false
 		}
 
-		if nd := (cmdflag.FlagNotDefinedError{}); errors.As(err, &nd) {
+		if nd, ok := errors.AsType[cmdflag.FlagNotDefinedError](err); ok {
 			// This is a flag we do not know. We must assume that any args we see
 			// after this might be flag arguments, not package names, so make
 			// packageNames non-nil to indicate that the package list is complete.
@@ -342,11 +350,19 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 
 	var injectedFlags []string
 	if testJSON {
-		// If converting to JSON, we need the full output in order to pipe it to
-		// test2json.
-		injectedFlags = append(injectedFlags, "-test.v=true")
+		// If converting to JSON, we need the full output in order to pipe it to test2json.
+		// The -test.v=test2json flag is like -test.v=true but causes the test to add
+		// extra ^V characters before testing output lines and other framing,
+		// which helps test2json do a better job creating the JSON events.
+		injectedFlags = append(injectedFlags, "-test.v=test2json")
 		delete(addFromGOFLAGS, "v")
 		delete(addFromGOFLAGS, "test.v")
+
+		if gotestjsonbuildtext.Value() == "1" {
+			gotestjsonbuildtext.IncNonDefault()
+		} else {
+			cfg.BuildJSON = true
+		}
 	}
 
 	// Inject flags from GOFLAGS before the explicit command-line arguments.
@@ -377,7 +393,8 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 	// directory, but 'go test' defaults it to the working directory of the 'go'
 	// command. Set it explicitly if it is needed due to some other flag that
 	// requests output.
-	if testProfile() != "" && !outputDirSet {
+	needOutputDir := testProfile() != "" || testArtifacts
+	if needOutputDir && !outputDirSet {
 		injectedFlags = append(injectedFlags, "-test.outputdir="+testOutputDir.getAbs())
 	}
 

@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"internal/coverage"
+	"internal/coverage/cmerge"
 	"internal/coverage/decodecounter"
 	"internal/coverage/decodemeta"
 	"internal/coverage/pods"
@@ -29,7 +30,7 @@ func makeMergeOp() covOperation {
 	return m
 }
 
-// dstate encapsulates state and provides methods for implementing the
+// mstate encapsulates state and provides methods for implementing the
 // merge operation. This type implements the CovDataVisitor interface,
 // and is designed to be used in concert with the CovDataReader
 // utility, which abstracts away most of the grubby details of reading
@@ -60,6 +61,7 @@ func (m *mstate) Setup() {
 	if *outdirflag == "" {
 		m.Usage("select output directory with '-o' option")
 	}
+	m.mm.SetModeMergePolicy(cmerge.ModeMergeRelaxed)
 }
 
 func (m *mstate) BeginPod(p pods.Pod) {

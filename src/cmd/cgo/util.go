@@ -10,13 +10,14 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"slices"
 )
 
 // run runs the command argv, feeding in stdin on standard input.
 // It returns the output to standard output and standard error.
 // ok indicates whether the command exited successfully.
 func run(stdin []byte, argv []string) (stdout, stderr []byte, ok bool) {
-	if i := find(argv, "-xc"); i >= 0 && argv[len(argv)-1] == "-" {
+	if i := slices.Index(argv, "-xc"); i >= 0 && argv[len(argv)-1] == "-" {
 		// Some compilers have trouble with standard input.
 		// Others have trouble with -xc.
 		// Avoid both problems by writing a file with a .c extension.
@@ -69,21 +70,12 @@ func run(stdin []byte, argv []string) (stdout, stderr []byte, ok bool) {
 	return
 }
 
-func find(argv []string, target string) int {
-	for i, arg := range argv {
-		if arg == target {
-			return i
-		}
-	}
-	return -1
-}
-
 func lineno(pos token.Pos) string {
 	return fset.Position(pos).String()
 }
 
 // Die with an error message.
-func fatalf(msg string, args ...interface{}) {
+func fatalf(msg string, args ...any) {
 	// If we've already printed other errors, they might have
 	// caused the fatal condition. Assume they're enough.
 	if nerrors == 0 {
@@ -94,7 +86,7 @@ func fatalf(msg string, args ...interface{}) {
 
 var nerrors int
 
-func error_(pos token.Pos, msg string, args ...interface{}) {
+func error_(pos token.Pos, msg string, args ...any) {
 	nerrors++
 	if pos.IsValid() {
 		fmt.Fprintf(os.Stderr, "%s: ", fset.Position(pos).String())

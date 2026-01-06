@@ -9,8 +9,8 @@ package main
 // and "intersect" subcommands.
 
 import (
-	"crypto/md5"
 	"fmt"
+	"hash/fnv"
 	"internal/coverage"
 	"internal/coverage/calloc"
 	"internal/coverage/cmerge"
@@ -160,13 +160,13 @@ func (mm *metaMerge) beginPod() {
 // the things in a pod -- counter files and meta-data file. There are
 // three cases of interest here:
 //
-// Case 1: in an unconditonal merge (we're not selecting a specific set of
+// Case 1: in an unconditional merge (we're not selecting a specific set of
 // packages using "-pkg", and the "-pcombine" option is not in use),
 // we can simply copy over the meta-data file from input to output.
 //
 // Case 2: if this is a select merge (-pkg is in effect), then at
 // this point we write out a new smaller meta-data file that includes
-// only the packages of interest). At this point we also emit a merged
+// only the packages of interest. At this point we also emit a merged
 // counter data file as well.
 //
 // Case 3: if "-pcombine" is in effect, we don't write anything at
@@ -191,7 +191,7 @@ func (mm *metaMerge) endPod(pcombine bool) {
 		copyMetaDataFile(inpath, outpath)
 	}
 
-	// Emit acccumulated counter data for this pod.
+	// Emit accumulated counter data for this pod.
 	mm.emitCounters(*outdirflag, finalHash)
 
 	// Reset package state.
@@ -207,7 +207,8 @@ func (mm *metaMerge) endPod(pcombine bool) {
 // part of a merge operation, specifically a merge with the
 // "-pcombine" flag.
 func (mm *metaMerge) emitMeta(outdir string, pcombine bool) [16]byte {
-	fh := md5.New()
+	fh := fnv.New128a()
+	fhSum := fnv.New128a()
 	blobs := [][]byte{}
 	tlen := uint64(unsafe.Sizeof(coverage.MetaFileHeader{}))
 	for _, p := range mm.pkgs {
@@ -219,7 +220,9 @@ func (mm *metaMerge) emitMeta(outdir string, pcombine bool) [16]byte {
 		} else {
 			blob = p.mdblob
 		}
-		ph := md5.Sum(blob)
+		fhSum.Reset()
+		fhSum.Write(blob)
+		ph := fhSum.Sum(nil)
 		blobs = append(blobs, blob)
 		if _, err := fh.Write(ph[:]); err != nil {
 			panic(fmt.Sprintf("internal error: md5 sum failed: %v", err))
@@ -237,6 +240,12 @@ func (mm *metaMerge) emitMeta(outdir string, pcombine bool) [16]byte {
 	if err != nil {
 		fatal("unable to open output meta-data file %s: %v", fpath, err)
 	}
+
+	defer func() {
+		if err := mf.Close(); err != nil {
+			fatal("error closing output meta-data file %s: %v", fpath, err)
+		}
+	}()
 
 	// Encode and write.
 	mfw := encodemeta.NewCoverageMetaFileWriter(fpath, mf)
@@ -271,17 +280,6 @@ func (mm *metaMerge) emitCounters(outdir string, metaHash [16]byte) {
 		fatal("counter file write failed: %v", err)
 	}
 	mm.astate = &argstate{}
-}
-
-// NumFuncs is used while writing the counter data files; it
-// implements the 'NumFuncs' method required by the interface
-// internal/coverage/encodecounter/CounterVisitor.
-func (mm *metaMerge) NumFuncs() (int, error) {
-	rval := 0
-	for _, p := range mm.pkgs {
-		rval += len(p.ctab)
-	}
-	return rval, nil
 }
 
 // VisitFuncs is used while writing the counter data files; it

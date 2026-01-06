@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"cmd/internal/notsha256"
+	"cmd/internal/hash"
 	"cmd/internal/src"
 )
 
@@ -18,7 +18,7 @@ func printFunc(f *Func) {
 }
 
 func hashFunc(f *Func) []byte {
-	h := notsha256.New()
+	h := hash.New32()
 	p := stringFuncPrinter{w: h, printDead: true}
 	fprintFunc(p, f)
 	return h.Sum(nil)
@@ -33,7 +33,7 @@ func (f *Func) String() string {
 
 // rewriteHash returns a hash of f suitable for detecting rewrite cycles.
 func (f *Func) rewriteHash() string {
-	h := notsha256.New()
+	h := hash.New32()
 	p := stringFuncPrinter{w: h, printDead: false}
 	fprintFunc(p, f)
 	return fmt.Sprintf("%x", h.Sum(nil))
@@ -124,7 +124,7 @@ func (p stringFuncPrinter) named(n LocalSlot, vals []*Value) {
 
 func fprintFunc(p funcPrinter, f *Func) {
 	reachable, live := findlive(f)
-	defer f.retDeadcodeLive(live)
+	defer f.Cache.freeBoolSlice(live)
 	p.header(f)
 	printed := make([]bool, f.NumValues())
 	for _, b := range f.Blocks {

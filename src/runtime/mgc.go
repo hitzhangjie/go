@@ -5,7 +5,7 @@
 // Garbage collector (GC).
 //
 // The GC runs concurrently with mutator threads, is type accurate (aka precise), allows multiple
-// GC thread to run in parallel. It is a concurrent mark and sweep that uses a write barrier. It is
+// GC threads to run in parallel. It is a concurrent mark and sweep that uses a write barrier. It is
 // non-generational and non-compacting. Allocation is done using size segregated per P allocation
 // areas to minimize fragmentation while eliminating locks in the common case.
 //
@@ -130,14 +130,19 @@ package runtime
 
 import (
 	"internal/cpu"
-	"runtime/internal/atomic"
+	"internal/goarch"
+	"internal/goexperiment"
+	"internal/runtime/atomic"
+	"internal/runtime/gc"
 	"unsafe"
 )
 
 const (
-	_DebugGC         = 0
-	_ConcurrentSweep = true
-	_FinBlockSize    = 4 * 1024
+	_DebugGC = 0
+
+	// concurrentSweep is a debug flag. Disabling this flag
+	// ensures all spans are swept while the world is stopped.
+	concurrentSweep = true
 
 	// debugScanConservative enables debug logging for stack
 	// frames that are scanned conservatively.
@@ -148,6 +153,28 @@ const (
 	// cycles.
 	sweepMinHeapDistance = 1024 * 1024
 )
+
+// heapObjectsCanMove always returns false in the current garbage collector.
+// It exists for go4.org/unsafe/assume-no-moving-gc, which is an
+// unfortunate idea that had an even more unfortunate implementation.
+// Every time a new Go release happened, the package stopped building,
+// and the authors had to add a new file with a new //go:build line, and
+// then the entire ecosystem of packages with that as a dependency had to
+// explicitly update to the new version. Many packages depend on
+// assume-no-moving-gc transitively, through paths like
+// inet.af/netaddr -> go4.org/intern -> assume-no-moving-gc.
+// This was causing a significant amount of friction around each new
+// release, so we added this bool for the package to //go:linkname
+// instead. The bool is still unfortunate, but it's not as bad as
+// breaking the ecosystem on every new release.
+//
+// If the Go garbage collector ever does move heap objects, we can set
+// this to true to break all the programs using assume-no-moving-gc.
+//
+//go:linkname heapObjectsCanMove
+func heapObjectsCanMove() bool {
+	return false
+}
 
 func gcinit() {
 	if unsafe.Sizeof(workbuf{}) != _WorkbufSize {
@@ -161,11 +188,20 @@ func gcinit() {
 	// Use the environment variable GOMEMLIMIT for the initial memoryLimit value.
 	gcController.init(readGOGC(), readGOMEMLIMIT())
 
+	// Set up the cleanup block ptr mask.
+	for i := range cleanupBlockPtrMask {
+		cleanupBlockPtrMask[i] = 0xff
+	}
+
 	work.startSema = 1
 	work.markDoneSema = 1
+	work.spanSPMCs.list.init(unsafe.Offsetof(spanSPMC{}.allnode))
 	lockInit(&work.sweepWaiters.lock, lockRankSweepWaiters)
 	lockInit(&work.assistQueue.lock, lockRankAssistQueue)
+	lockInit(&work.strongFromWeak.lock, lockRankStrongFromWeakQueue)
 	lockInit(&work.wbufSpans.lock, lockRankWbufSpans)
+	lockInit(&work.spanSPMCs.lock, lockRankSpanSPMCs)
+	lockInit(&gcCleanups.lock, lockRankCleanupQueue)
 }
 
 // gcenable is called after the bulk of the runtime initialization,
@@ -190,11 +226,19 @@ var gcphase uint32
 // If you change it, you must change builtin/runtime.go, too.
 // If you change the first four bytes, you must also change the write
 // barrier insertion code.
+//
+// writeBarrier should be an internal detail,
+// but widely used packages access it using linkname.
+// Notable members of the hall of shame include:
+//   - github.com/bytedance/sonic
+//
+// Do not remove or change the type signature.
+// See go.dev/issue/67401.
+//
+//go:linkname writeBarrier
 var writeBarrier struct {
 	enabled bool    // compiler emits a check of this before calling write barrier
 	pad     [3]byte // compiler uses 32-bit load for "enabled" field
-	needed  bool    // whether we need a write barrier for current GC phase
-	cgo     bool    // whether we need a write barrier for a cgo check
 	alignme uint64  // guarantee alignment so that compiler can use a 32 or 64-bit load
 }
 
@@ -212,8 +256,7 @@ const (
 //go:nosplit
 func setGCPhase(x uint32) {
 	atomic.Store(&gcphase, x)
-	writeBarrier.needed = gcphase == _GCmark || gcphase == _GCmarktermination
-	writeBarrier.enabled = writeBarrier.needed || writeBarrier.cgo
+	writeBarrier.enabled = gcphase == _GCmark || gcphase == _GCmarktermination
 }
 
 // gcMarkWorkerMode represents the mode that a concurrent mark worker
@@ -273,7 +316,7 @@ func pollFractionalWorkerExit() bool {
 		return true
 	}
 	p := getg().m.p.ptr()
-	selfTime := p.gcFractionalMarkTime + (now - p.gcMarkWorkerStartTime)
+	selfTime := p.gcFractionalMarkTime.Load() + (now - p.gcMarkWorkerStartTime)
 	// Add some slack to the utilization goal so that the
 	// fractional worker isn't behind again the instant it exits.
 	return float64(selfTime)/float64(delta) > 1.2*gcController.fractionalUtilizationGoal
@@ -283,8 +326,9 @@ var work workType
 
 type workType struct {
 	full  lfstack          // lock-free list of full blocks workbuf
+	_     cpu.CacheLinePad // prevents false-sharing between full and empty
 	empty lfstack          // lock-free list of empty blocks workbuf
-	pad0  cpu.CacheLinePad // prevents false-sharing between full/empty and nproc/nwait
+	_     cpu.CacheLinePad // prevents false-sharing between empty and wbufSpans
 
 	wbufSpans struct {
 		lock mutex
@@ -295,17 +339,36 @@ type workType struct {
 		// one of the workbuf lists.
 		busy mSpanList
 	}
+	_ cpu.CacheLinePad // prevents false-sharing between wbufSpans and spanWorkMask
+
+	// spanqMask is a bitmap indicating which Ps have local work worth stealing.
+	// Set or cleared by the owning P, cleared by stealing Ps.
+	//
+	// spanqMask is like a proxy for a global queue. An important invariant is that
+	// forced flushing like gcw.dispose must set this bit on any P that has local
+	// span work.
+	spanqMask pMask
+	_         cpu.CacheLinePad // prevents false-sharing between spanqMask and everything else
+
+	// List of all spanSPMCs.
+	//
+	// Only used if goexperiment.GreenTeaGC.
+	spanSPMCs struct {
+		lock mutex
+		list listHeadManual // *spanSPMC
+	}
 
 	// Restore 64-bit alignment on 32-bit.
-	_ uint32
+	// _ uint32
 
 	// bytesMarked is the number of bytes marked this cycle. This
 	// includes bytes blackened in scanned objects, noscan objects
-	// that go straight to black, and permagrey objects scanned by
-	// markroot during the concurrent scan phase. This is updated
-	// atomically during the cycle. Updates may be batched
-	// arbitrarily, since the value is only read at the end of the
-	// cycle.
+	// that go straight to black, objects allocated as black during
+	// the cycle, and permagrey objects scanned by markroot during
+	// the concurrent scan phase.
+	//
+	// This is updated atomically during the cycle. Updates may be batched
+	// arbitrarily, since the value is only read at the end of the cycle.
 	//
 	// Because of benign races during marking, this number may not
 	// be the exact number of marked bytes, but it should be very
@@ -315,26 +378,53 @@ type workType struct {
 	// (and thus 8-byte alignment even on 32-bit architectures).
 	bytesMarked uint64
 
-	markrootNext uint32 // next markroot job
-	markrootJobs uint32 // number of markroot jobs
+	markrootNext atomic.Uint32 // next markroot job
+	markrootJobs atomic.Uint32 // number of markroot jobs
 
 	nproc  uint32
 	tstart int64
 	nwait  uint32
 
-	// Number of roots of various root types. Set by gcMarkRootPrepare.
+	// Number of roots of various root types. Set by gcPrepareMarkRoots.
 	//
-	// nStackRoots == len(stackRoots), but we have nStackRoots for
-	// consistency.
-	nDataRoots, nBSSRoots, nSpanRoots, nStackRoots int
+	// During normal GC cycle, nStackRoots == nMaybeRunnableStackRoots == len(stackRoots);
+	// during goroutine leak detection, nMaybeRunnableStackRoots is the number of stackRoots
+	// scheduled for marking.
+	// In both variants, nStackRoots == len(stackRoots).
+	nDataRoots, nBSSRoots, nSpanRoots, nStackRoots, nMaybeRunnableStackRoots int
 
-	// Base indexes of each root type. Set by gcMarkRootPrepare.
+	// The following fields monitor the GC phase of the current cycle during
+	// goroutine leak detection.
+	goroutineLeak struct {
+		// Once set, it indicates that the GC will perform goroutine leak detection during
+		// the next GC cycle; it is set by goroutineLeakGC and unset during gcStart.
+		pending atomic.Bool
+		// Once set, it indicates that the GC has started a goroutine leak detection run;
+		// it is set during gcStart and unset during gcMarkTermination;
+		//
+		// Protected by STW.
+		enabled bool
+		// Once set, it indicates that the GC has performed goroutine leak detection during
+		// the current GC cycle; it is set during gcMarkDone, right after goroutine leak detection,
+		// and unset during gcMarkTermination;
+		//
+		// Protected by STW.
+		done bool
+		// The number of leaked goroutines during the last leak detection GC cycle.
+		//
+		// Write-protected by STW in findGoroutineLeaks.
+		count int
+	}
+
+	// Base indexes of each root type. Set by gcPrepareMarkRoots.
 	baseData, baseBSS, baseSpans, baseStacks, baseEnd uint32
 
-	// stackRoots is a snapshot of all of the Gs that existed
-	// before the beginning of concurrent marking. The backing
-	// store of this must not be modified because it might be
-	// shared with allgs.
+	// stackRoots is a snapshot of all of the Gs that existed before the
+	// beginning of concurrent marking.  During goroutine leak detection, stackRoots
+	// is partitioned into two sets; to the left of nMaybeRunnableStackRoots are stackRoots
+	// of running / runnable goroutines and to the right of nMaybeRunnableStackRoots are
+	// stackRoots of unmarked / not runnable goroutines
+	// The stackRoots array is re-partitioned after each marking phase iteration.
 	stackRoots []*g
 
 	// Each type of GC state transition is protected by a lock.
@@ -355,8 +445,7 @@ type workType struct {
 	// markDoneSema protects transitions from mark to mark termination.
 	markDoneSema uint32
 
-	bgMarkReady note   // signal background mark worker has started
-	bgMarkDone  uint32 // cas to 1 when at a background mark completion point
+	bgMarkDone uint32 // cas to 1 when at a background mark completion point
 	// Background mark completion signaling
 
 	// mode is the concurrency mode of the current GC cycle.
@@ -385,6 +474,26 @@ type workType struct {
 		list gList
 	}
 
+	// strongFromWeak controls how the GC interacts with weak->strong
+	// pointer conversions.
+	strongFromWeak struct {
+		// block is a flag set during mark termination that prevents
+		// new weak->strong conversions from executing by blocking the
+		// goroutine and enqueuing it onto q.
+		//
+		// Mutated only by one goroutine at a time in gcMarkDone,
+		// with globally-synchronizing events like forEachP and
+		// stopTheWorld.
+		block bool
+
+		// q is a queue of goroutines that attempted to perform a
+		// weak->strong conversion during mark termination.
+		//
+		// Protected by lock.
+		lock mutex
+		q    gQueue
+	}
+
 	// cycles is the number of completed GC cycles, where a GC
 	// cycle is sweep termination, mark, mark termination, and
 	// sweep. This differs from memstats.numgc, which is
@@ -395,8 +504,10 @@ type workType struct {
 	stwprocs, maxprocs                 int32
 	tSweepTerm, tMark, tMarkTerm, tEnd int64 // nanotime() of phase start
 
-	pauseNS    int64 // total STW time this cycle
-	pauseStart int64 // nanotime() of last STW
+	// pauseNS is the total STW time this cycle, measured as the time between
+	// when stopping began (just before trying to stop Ps) and just after the
+	// world started again.
+	pauseNS int64
 
 	// debug.gctrace heap sizes for this cycle.
 	heap0, heap1, heap2 uint64
@@ -451,7 +562,6 @@ func GC() {
 	// as part of tests and benchmarks to get the system into a
 	// relatively stable and isolated state.
 	for work.cycles.Load() == n+1 && sweepone() != ^uintptr(0) {
-		sweep.nbgsweep++
 		Gosched()
 	}
 
@@ -481,6 +591,55 @@ func GC() {
 	releasem(mp)
 }
 
+// goroutineLeakGC runs a GC cycle that performs goroutine leak detection.
+//
+//go:linkname goroutineLeakGC runtime/pprof.runtime_goroutineLeakGC
+func goroutineLeakGC() {
+	// Set the pending flag to true, instructing the next GC cycle to
+	// perform goroutine leak detection.
+	work.goroutineLeak.pending.Store(true)
+
+	// Spin GC cycles until the pending flag is unset.
+	// This ensures that goroutineLeakGC waits for a GC cycle that
+	// actually performs goroutine leak detection.
+	//
+	// This is needed in case multiple concurrent calls to GC
+	// are simultaneously fired by the system, wherein some
+	// of them are dropped.
+	//
+	// In the vast majority of cases, only one loop iteration is needed;
+	// however, multiple concurrent calls to goroutineLeakGC could lead to
+	// the execution of additional GC cycles.
+	//
+	// Examples:
+	//
+	// pending? |   G1                    | G2
+	// ---------|-------------------------|-----------------------
+	//     -    | goroutineLeakGC()       | goroutineLeakGC()
+	//     -    | pending.Store(true)     | .
+	//     X    | for pending.Load()      | .
+	//     X    | GC()                    | .
+	//     X    | > gcStart()             | .
+	//     X    |   pending.Store(false)  | .
+	// ...
+	//     -    | > gcMarkDone()          | .
+	//     -    |   .                     | pending.Store(true)
+	// ...
+	//     X    | > gcMarkTermination()   | .
+	//     X    |   ...
+	//     X    | < GC returns            | .
+	//     X    | for pending.Load        | .
+	//     X    | GC()                    | .
+	//     X    | .                       | for pending.Load()
+	//     X    | .                       | GC()
+	// ...
+	// The first to pick up the pending flag will start a
+	// leak detection cycle.
+	for work.goroutineLeak.pending.Load() {
+		GC()
+	}
+}
+
 // gcWaitOnMark blocks until GC finishes the Nth mark phase. If GC has
 // already completed this mark phase, it returns immediately.
 func gcWaitOnMark(n uint32) {
@@ -501,7 +660,7 @@ func gcWaitOnMark(n uint32) {
 		// Wait until sweep termination, mark, and mark
 		// termination of cycle N complete.
 		work.sweepWaiters.list.push(getg())
-		goparkunlock(&work.sweepWaiters.lock, waitReasonWaitForGCCycle, traceEvGoBlock, 1)
+		goparkunlock(&work.sweepWaiters.lock, waitReasonWaitForGCCycle, traceBlockUntilGCEnds, 1)
 	}
 }
 
@@ -550,10 +709,6 @@ func (t gcTrigger) test() bool {
 	}
 	switch t.kind {
 	case gcTriggerHeap:
-		// Non-atomic access to gcController.heapLive for performance. If
-		// we are going to trigger on this, this thread just
-		// atomically wrote gcController.heapLive anyway and we'll see our
-		// own write.
 		trigger, _ := gcController.trigger()
 		return gcController.heapLive.Load() >= trigger
 	case gcTriggerTime:
@@ -588,6 +743,17 @@ func gcStart(trigger gcTrigger) {
 	releasem(mp)
 	mp = nil
 
+	if gp := getg(); gp.bubble != nil {
+		// Disassociate the G from its synctest bubble while allocating.
+		// This is less elegant than incrementing the group's active count,
+		// but avoids any contamination between GC and synctest.
+		bubble := gp.bubble
+		gp.bubble = nil
+		defer func() {
+			gp.bubble = bubble
+		}()
+	}
+
 	// Pick up the remaining unswept/not being swept spans concurrently
 	//
 	// This shouldn't happen if we're being invoked in background
@@ -599,7 +765,6 @@ func gcStart(trigger gcTrigger) {
 	// We check the transition condition continuously here in case
 	// this G gets delayed in to the next GC cycle.
 	for trigger.test() && sweepone() != ^uintptr(0) {
-		sweep.nbgsweep++
 	}
 
 	// Perform GC initialization and the sweep termination
@@ -630,15 +795,22 @@ func gcStart(trigger gcTrigger) {
 	// Update it under gcsema to avoid gctrace getting wrong values.
 	work.userForced = trigger.kind == gcTriggerCycle
 
-	if trace.enabled {
-		traceGCStart()
+	trace := traceAcquire()
+	if trace.ok() {
+		trace.GCStart()
+		traceRelease(trace)
 	}
 
-	// Check that all Ps have finished deferred mcache flushes.
+	// Check and setup per-P state.
 	for _, p := range allp {
+		// Check that all Ps have finished deferred mcache flushes.
 		if fg := p.mcache.flushGen.Load(); fg != mheap_.sweepgen {
 			println("runtime: p", p.id, "flushGen", fg, "!= sweepgen", mheap_.sweepgen)
 			throw("p mcache not flushed")
+		}
+		// Initialize ptrBuf if necessary.
+		if goexperiment.GreenTeaGC && p.gcw.ptrBuf == nil {
+			p.gcw.ptrBuf = (*[gc.PageSize / goarch.PtrSize]uintptr)(persistentalloc(gc.PageSize, goarch.PtrSize, &memstats.gcMiscSys))
 		}
 	}
 
@@ -647,10 +819,10 @@ func gcStart(trigger gcTrigger) {
 	systemstack(gcResetMarkState)
 
 	work.stwprocs, work.maxprocs = gomaxprocs, gomaxprocs
-	if work.stwprocs > ncpu {
-		// This is used to compute CPU time of the STW phases,
-		// so it can't be more than ncpu, even if GOMAXPROCS is.
-		work.stwprocs = ncpu
+	if work.stwprocs > numCPUStartup {
+		// This is used to compute CPU time of the STW phases, so it
+		// can't be more than the CPU count, even if GOMAXPROCS is.
+		work.stwprocs = numCPUStartup
 	}
 	work.heap0 = gcController.heapLive.Load()
 	work.pauseNS = 0
@@ -658,17 +830,47 @@ func gcStart(trigger gcTrigger) {
 
 	now := nanotime()
 	work.tSweepTerm = now
-	work.pauseStart = now
-	if trace.enabled {
-		traceGCSTWStart(1)
+	var stw worldStop
+	systemstack(func() {
+		stw = stopTheWorldWithSema(stwGCSweepTerm)
+	})
+
+	// Accumulate fine-grained stopping time.
+	work.cpuStats.accumulateGCPauseTime(stw.stoppingCPUTime, 1)
+
+	if goexperiment.RuntimeSecret {
+		// The world is stopped. Every M is either parked
+		// or in a syscall, or running some non-go code which can't run in secret mode.
+		// To get to a parked or a syscall state
+		// they have to transition through a point where we erase any
+		// confidential information in the registers. Making them
+		// handle a signal now would clobber the signal stack
+		// with non-confidential information.
+		//
+		// TODO(dmo): this is linear with respect to the number of Ms.
+		// Investigate just how long this takes and whether we can somehow
+		// loop over just the Ms that have secret info on their signal stack,
+		// or cooperatively have the Ms send signals to themselves just
+		// after they erase their registers, but before they enter a syscall
+		for mp := allm; mp != nil; mp = mp.alllink {
+			// even through the world is stopped, the kernel can still
+			// invoke our signal handlers. No confidential information can be spilled
+			// (because it's been erased by this time), but we can avoid
+			// sending additional signals by atomically inspecting this variable
+			if atomic.Xchg(&mp.signalSecret, 0) != 0 {
+				noopSignal(mp)
+			}
+			// TODO: syncronize with the signal handler to ensure that the signal
+			// was actually delivered.
+		}
 	}
-	systemstack(stopTheWorldWithSema)
+
 	// Finish sweep before we start concurrent scan.
 	systemstack(func() {
 		finishsweep_m()
 	})
 
-	// clearpools before we start the GC. If we wait they memory will not be
+	// clearpools before we start the GC. If we wait the memory will not be
 	// reclaimed until the next GC cycle.
 	clearpools()
 
@@ -688,6 +890,15 @@ func gcStart(trigger gcTrigger) {
 		schedEnableUser(false)
 	}
 
+	// If goroutine leak detection is pending, enable it for this GC cycle.
+	if work.goroutineLeak.pending.Load() {
+		work.goroutineLeak.enabled = true
+		work.goroutineLeak.pending.Store(false)
+		// Set all sync objects of blocked goroutines as untraceable
+		// by the GC. Only set as traceable at the end of the GC cycle.
+		setSyncObjectsUntraceable()
+	}
+
 	// Enter concurrent mark phase and enable
 	// write barriers.
 	//
@@ -700,12 +911,12 @@ func gcStart(trigger gcTrigger) {
 	// enabled because they must be enabled before
 	// any non-leaf heap objects are marked. Since
 	// allocations are blocked until assists can
-	// happen, we want enable assists as early as
+	// happen, we want to enable assists as early as
 	// possible.
 	setGCPhase(_GCmark)
 
-	gcBgMarkPrepare() // Must happen before assist enable.
-	gcMarkRootPrepare()
+	gcBgMarkPrepare() // Must happen before assists are enabled.
+	gcPrepareMarkRoots()
 
 	// Mark all active tinyalloc blocks. Since we're
 	// allocating from these, they need to be black like
@@ -725,12 +936,18 @@ func gcStart(trigger gcTrigger) {
 	// returns, so make sure we're not preemptible.
 	mp = acquirem()
 
+	// Update the CPU stats pause time.
+	//
+	// Use maxprocs instead of stwprocs here because the total time
+	// computed in the CPU stats is based on maxprocs, and we want them
+	// to be comparable.
+	work.cpuStats.accumulateGCPauseTime(nanotime()-stw.finishedStopping, work.maxprocs)
+
 	// Concurrent mark.
 	systemstack(func() {
-		now = startTheWorldWithSema(trace.enabled)
-		work.pauseNS += now - work.pauseStart
+		now = startTheWorldWithSema(0, stw)
+		work.pauseNS += now - stw.startedStopping
 		work.tMark = now
-		memstats.gcPauseDist.record(now - work.pauseStart)
 
 		// Release the CPU limiter.
 		gcCPULimiter.finishGCTransition(now)
@@ -760,16 +977,30 @@ func gcStart(trigger gcTrigger) {
 // This is protected by markDoneSema.
 var gcMarkDoneFlushed uint32
 
+// gcDebugMarkDone contains fields used to debug/test mark termination.
+var gcDebugMarkDone struct {
+	// spinAfterRaggedBarrier forces gcMarkDone to spin after it executes
+	// the ragged barrier.
+	spinAfterRaggedBarrier atomic.Bool
+
+	// restartedDueTo27993 indicates that we restarted mark termination
+	// due to the bug described in issue #27993.
+	//
+	// Protected by worldsema.
+	restartedDueTo27993 bool
+}
+
 // gcMarkDone transitions the GC from mark to mark termination if all
 // reachable objects have been marked (that is, there are no grey
 // objects and can be no more in the future). Otherwise, it flushes
 // all local work to the global queues where it can be discovered by
 // other workers.
 //
+// All goroutines performing GC work must call gcBeginWork to signal
+// that they're executing GC work. They must call gcEndWork when done.
 // This should be called when all local mark work has been drained and
-// there are no remaining workers. Specifically, when
-//
-//	work.nwait == work.nproc && !gcMarkWorkAvailable(p)
+// there are no remaining workers. Specifically, when gcEndWork returns
+// true.
 //
 // The calling context must be preemptible.
 //
@@ -793,7 +1024,7 @@ top:
 	// empty before performing the ragged barrier. Otherwise,
 	// there could be global work that a P could take after the P
 	// has passed the ragged barrier.
-	if !(gcphase == _GCmark && work.nwait == work.nproc && !gcMarkWorkAvailable(nil)) {
+	if !(gcphase == _GCmark && gcIsMarkDone()) {
 		semrelease(&work.markDoneSema)
 		return
 	}
@@ -802,33 +1033,29 @@ top:
 	// stop the world later, so acquire worldsema now.
 	semacquire(&worldsema)
 
+	// Prevent weak->strong conversions from generating additional
+	// GC work. forEachP will guarantee that it is observed globally.
+	work.strongFromWeak.block = true
+
 	// Flush all local buffers and collect flushedWork flags.
 	gcMarkDoneFlushed = 0
-	systemstack(func() {
-		gp := getg().m.curg
-		// Mark the user stack as preemptible so that it may be scanned.
-		// Otherwise, our attempt to force all P's to a safepoint could
-		// result in a deadlock as we attempt to preempt a worker that's
-		// trying to preempt us (e.g. for a stack scan).
-		casGToWaiting(gp, _Grunning, waitReasonGCMarkTermination)
-		forEachP(func(pp *p) {
-			// Flush the write barrier buffer, since this may add
-			// work to the gcWork.
-			wbBufFlush1(pp)
+	forEachP(waitReasonGCMarkTermination, func(pp *p) {
+		// Flush the write barrier buffer, since this may add
+		// work to the gcWork.
+		wbBufFlush1(pp)
 
-			// Flush the gcWork, since this may create global work
-			// and set the flushedWork flag.
-			//
-			// TODO(austin): Break up these workbufs to
-			// better distribute work.
-			pp.gcw.dispose()
-			// Collect the flushedWork flag.
-			if pp.gcw.flushedWork {
-				atomic.Xadd(&gcMarkDoneFlushed, 1)
-				pp.gcw.flushedWork = false
-			}
-		})
-		casgstatus(gp, _Gwaiting, _Grunning)
+		// Flush the gcWork, since this may create global work
+		// and set the flushedWork flag.
+		//
+		// TODO(austin): Break up these workbufs to
+		// better distribute work.
+		pp.gcw.dispose()
+
+		// Collect the flushedWork flag.
+		if pp.gcw.flushedWork {
+			atomic.Xadd(&gcMarkDoneFlushed, 1)
+			pp.gcw.flushedWork = false
+		}
 	})
 
 	if gcMarkDoneFlushed != 0 {
@@ -841,21 +1068,27 @@ top:
 		goto top
 	}
 
+	// For debugging/testing.
+	for gcDebugMarkDone.spinAfterRaggedBarrier.Load() {
+	}
+
 	// There was no global work, no local work, and no Ps
 	// communicated work since we took markDoneSema. Therefore
 	// there are no grey objects and no more objects can be
 	// shaded. Transition to mark termination.
 	now := nanotime()
 	work.tMarkTerm = now
-	work.pauseStart = now
 	getg().m.preemptoff = "gcing"
-	if trace.enabled {
-		traceGCSTWStart(0)
-	}
-	systemstack(stopTheWorldWithSema)
+	var stw worldStop
+	systemstack(func() {
+		stw = stopTheWorldWithSema(stwGCMarkTerm)
+	})
 	// The gcphase is _GCmark, it will transition to _GCmarktermination
 	// below. The important thing is that the wb remains active until
 	// all marking is complete. This includes writes made by the GC.
+
+	// Accumulate fine-grained stopping time.
+	work.cpuStats.accumulateGCPauseTime(stw.stoppingCPUTime, 1)
 
 	// There is sometimes work left over when we enter mark termination due
 	// to write barriers performed after the completion barrier above.
@@ -876,12 +1109,29 @@ top:
 			}
 		}
 	})
-	if restart {
+
+	// Check whether we need to resume the marking phase because of issue #27993
+	// or because of goroutine leak detection.
+	if restart || (work.goroutineLeak.enabled && !work.goroutineLeak.done) {
+		if restart {
+			// Restart because of issue #27993.
+			gcDebugMarkDone.restartedDueTo27993 = true
+		} else {
+			// Marking has reached a fixed-point. Attempt to detect goroutine leaks.
+			//
+			// If the returned value is true, then detection already concluded for this cycle.
+			// Otherwise, more runnable goroutines were discovered, requiring additional mark work.
+			work.goroutineLeak.done = findGoroutineLeaks()
+		}
+
 		getg().m.preemptoff = ""
 		systemstack(func() {
-			now := startTheWorldWithSema(true)
-			work.pauseNS += now - work.pauseStart
-			memstats.gcPauseDist.record(now - work.pauseStart)
+			// Accumulate the time we were stopped before we had to start again.
+			work.cpuStats.accumulateGCPauseTime(nanotime()-stw.finishedStopping, work.maxprocs)
+
+			// Start the world again.
+			now := startTheWorldWithSema(0, stw)
+			work.pauseNS += now - stw.startedStopping
 		})
 		semrelease(&worldsema)
 		goto top
@@ -900,6 +1150,11 @@ top:
 	// start the world again.
 	gcWakeAllAssists()
 
+	// Wake all blocked weak->strong conversions. These will run
+	// when we start the world again.
+	work.strongFromWeak.block = false
+	gcWakeAllStrongFromWeak()
+
 	// Likewise, release the transition lock. Blocked
 	// workers and assists will run when we start the
 	// world again.
@@ -915,12 +1170,178 @@ top:
 	gcController.endCycle(now, int(gomaxprocs), work.userForced)
 
 	// Perform mark termination. This will restart the world.
-	gcMarkTermination()
+	gcMarkTermination(stw)
+}
+
+// isMaybeRunnable checks whether a goroutine may still be semantically runnable.
+// For goroutines which are semantically runnable, this will eventually return true
+// as the GC marking phase progresses. It returns false for leaked goroutines, or for
+// goroutines which are not yet computed as possibly runnable by the GC.
+func (gp *g) isMaybeRunnable() bool {
+	// Check whether the goroutine is actually in a waiting state first.
+	if readgstatus(gp) != _Gwaiting {
+		// If the goroutine is not waiting, then clearly it is maybe runnable.
+		return true
+	}
+
+	switch gp.waitreason {
+	case waitReasonSelectNoCases,
+		waitReasonChanSendNilChan,
+		waitReasonChanReceiveNilChan:
+		// Select with no cases or communicating on nil channels
+		// make goroutines unrunnable by definition.
+		return false
+	case waitReasonChanReceive,
+		waitReasonSelect,
+		waitReasonChanSend:
+		// Cycle all through all *sudog to check whether
+		// the goroutine is waiting on a marked channel.
+		for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+			if isMarkedOrNotInHeap(unsafe.Pointer(sg.c.get())) {
+				return true
+			}
+		}
+		return false
+	case waitReasonSyncCondWait,
+		waitReasonSyncWaitGroupWait,
+		waitReasonSyncMutexLock,
+		waitReasonSyncRWMutexLock,
+		waitReasonSyncRWMutexRLock:
+		// If waiting on mutexes, wait groups, or condition variables,
+		// check if the synchronization primitive attached to the sudog is marked.
+		if gp.waiting != nil {
+			return isMarkedOrNotInHeap(gp.waiting.elem.get())
+		}
+	}
+	return true
+}
+
+// findMaybeRunnableGoroutines checks to see if more blocked but maybe-runnable goroutines exist.
+// If so, it adds them into root set and increments work.markrootJobs accordingly.
+// Returns true if we need to run another phase of markroots; returns false otherwise.
+func findMaybeRunnableGoroutines() (moreWork bool) {
+	oldRootJobs := work.markrootJobs.Load()
+
+	// To begin with we have a set of unchecked stackRoots between
+	// vIndex and ivIndex. During the loop, anything < vIndex should be
+	// valid stackRoots and anything >= ivIndex should be invalid stackRoots.
+	// The loop terminates when the two indices meet.
+	var vIndex, ivIndex int = work.nMaybeRunnableStackRoots, work.nStackRoots
+	// Reorder goroutine list
+	for vIndex < ivIndex {
+		if work.stackRoots[vIndex].isMaybeRunnable() {
+			vIndex = vIndex + 1
+			continue
+		}
+		for ivIndex = ivIndex - 1; ivIndex != vIndex; ivIndex = ivIndex - 1 {
+			if gp := work.stackRoots[ivIndex]; gp.isMaybeRunnable() {
+				work.stackRoots[ivIndex] = work.stackRoots[vIndex]
+				work.stackRoots[vIndex] = gp
+				vIndex = vIndex + 1
+				break
+			}
+		}
+	}
+
+	newRootJobs := work.baseStacks + uint32(vIndex)
+	if newRootJobs > oldRootJobs {
+		work.nMaybeRunnableStackRoots = vIndex
+		work.markrootJobs.Store(newRootJobs)
+	}
+	return newRootJobs > oldRootJobs
+}
+
+// setSyncObjectsUntraceable scans allgs and sets the elem and c fields of all sudogs to
+// an untrackable pointer. This prevents the GC from marking these objects as live in memory
+// by following these pointers when runnning deadlock detection.
+func setSyncObjectsUntraceable() {
+	assertWorldStopped()
+
+	forEachGRace(func(gp *g) {
+		// Set as untraceable all synchronization objects of goroutines
+		// blocked at concurrency operations that could leak.
+		switch {
+		case gp.waitreason.isSyncWait():
+			// Synchronization primitives are reachable from the *sudog via
+			// via the elem field.
+			for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+				sg.elem.setUntraceable()
+			}
+		case gp.waitreason.isChanWait():
+			// Channels and select statements are reachable from the *sudog via the c field.
+			for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+				sg.c.setUntraceable()
+			}
+		}
+	})
+}
+
+// gcRestoreSyncObjects restores the elem and c fields of all sudogs to their original values.
+// Should be invoked after the goroutine leak detection phase.
+func gcRestoreSyncObjects() {
+	assertWorldStopped()
+
+	forEachGRace(func(gp *g) {
+		for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+			sg.elem.setTraceable()
+			sg.c.setTraceable()
+		}
+	})
+}
+
+// findGoroutineLeaks scans the remaining stackRoots and marks any which are
+// blocked over exclusively unreachable concurrency primitives as leaked (deadlocked).
+// Returns true if the goroutine leak check was performed (or unnecessary).
+// Returns false if the GC cycle has not yet computed all maybe-runnable goroutines.
+func findGoroutineLeaks() bool {
+	assertWorldStopped()
+
+	// Report goroutine leaks and mark them unreachable, and resume marking
+	// we still need to mark these unreachable *g structs as they
+	// get reused, but their stack won't get scanned
+	if work.nMaybeRunnableStackRoots == work.nStackRoots {
+		// nMaybeRunnableStackRoots == nStackRoots means that all goroutines are marked.
+		return true
+	}
+
+	// Check whether any more maybe-runnable goroutines can be found by the GC.
+	if findMaybeRunnableGoroutines() {
+		// We found more work, so we need to resume the marking phase.
+		return false
+	}
+
+	// For the remaining goroutines, mark them as unreachable and leaked.
+	work.goroutineLeak.count = work.nStackRoots - work.nMaybeRunnableStackRoots
+
+	for i := work.nMaybeRunnableStackRoots; i < work.nStackRoots; i++ {
+		gp := work.stackRoots[i]
+		casgstatus(gp, _Gwaiting, _Gleaked)
+
+		// Add the primitives causing the goroutine leaks
+		// to the GC work queue, to ensure they are marked.
+		//
+		// NOTE(vsaioc): these primitives should also be reachable
+		// from the goroutine's stack, but let's play it safe.
+		switch {
+		case gp.waitreason.isChanWait():
+			for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+				shade(sg.c.uintptr())
+			}
+		case gp.waitreason.isSyncWait():
+			for sg := gp.waiting; sg != nil; sg = sg.waitlink {
+				shade(sg.elem.uintptr())
+			}
+		}
+	}
+	// Put the remaining roots as ready for marking and drain them.
+	work.markrootJobs.Add(int32(work.nStackRoots - work.nMaybeRunnableStackRoots))
+	work.nMaybeRunnableStackRoots = work.nStackRoots
+	return true
 }
 
 // World must be stopped and mark assists and background workers must be
 // disabled.
-func gcMarkTermination() {
+func gcMarkTermination(stw worldStop) {
 	// Start marktermination (write barrier remains enabled for now).
 	setGCPhase(_GCmarktermination)
 
@@ -931,7 +1352,10 @@ func gcMarkTermination() {
 	mp.preemptoff = "gcing"
 	mp.traceback = 2
 	curgp := mp.curg
-	casGToWaiting(curgp, _Grunning, waitReasonGarbageCollection)
+	// N.B. The execution tracer is not aware of this status
+	// transition and handles it specially based on the
+	// wait reason.
+	casGToWaitingForSuspendG(curgp, _Grunning, waitReasonGarbageCollection)
 
 	// Run gc on the g0 stack. We do this so that the g stack
 	// we're currently running on will no longer change. Cuts
@@ -949,32 +1373,28 @@ func gcMarkTermination() {
 		// before continuing.
 	})
 
+	var stwSwept bool
 	systemstack(func() {
 		work.heap2 = work.bytesMarked
 		if debug.gccheckmark > 0 {
-			// Run a full non-parallel, stop-the-world
-			// mark using checkmark bits, to check that we
-			// didn't forget to mark anything during the
-			// concurrent mark process.
-			startCheckmarks()
-			gcResetMarkState()
-			gcw := &getg().m.p.ptr().gcw
-			gcDrain(gcw, 0)
-			wbBufFlush1(getg().m.p.ptr())
-			gcw.dispose()
-			endCheckmarks()
+			runCheckmark(func(_ *gcWork) { gcPrepareMarkRoots() })
+		}
+		if debug.checkfinalizers > 0 {
+			checkFinalizersAndCleanups()
 		}
 
 		// marking is complete so we can turn the write barrier off
 		setGCPhase(_GCoff)
-		gcSweep(work.mode)
+		stwSwept = gcSweep(work.mode)
 	})
 
 	mp.traceback = 0
 	casgstatus(curgp, _Gwaiting, _Grunning)
 
-	if trace.enabled {
-		traceGCDone()
+	trace := traceAcquire()
+	if trace.ok() {
+		trace.GCDone()
+		traceRelease(trace)
 	}
 
 	// all done
@@ -995,56 +1415,28 @@ func gcMarkTermination() {
 	now := nanotime()
 	sec, nsec, _ := time_now()
 	unixNow := sec*1e9 + int64(nsec)
-	work.pauseNS += now - work.pauseStart
+	work.pauseNS += now - stw.startedStopping
 	work.tEnd = now
-	memstats.gcPauseDist.record(now - work.pauseStart)
 	atomic.Store64(&memstats.last_gc_unix, uint64(unixNow)) // must be Unix time to make sense to user
 	atomic.Store64(&memstats.last_gc_nanotime, uint64(now)) // monotonic time for us
 	memstats.pause_ns[memstats.numgc%uint32(len(memstats.pause_ns))] = uint64(work.pauseNS)
 	memstats.pause_end[memstats.numgc%uint32(len(memstats.pause_end))] = uint64(unixNow)
 	memstats.pause_total_ns += uint64(work.pauseNS)
 
-	sweepTermCpu := int64(work.stwprocs) * (work.tMark - work.tSweepTerm)
-	// We report idle marking time below, but omit it from the
-	// overall utilization here since it's "free".
-	markAssistCpu := gcController.assistTime.Load()
-	markDedicatedCpu := gcController.dedicatedMarkTime.Load()
-	markFractionalCpu := gcController.fractionalMarkTime.Load()
-	markIdleCpu := gcController.idleMarkTime.Load()
-	markTermCpu := int64(work.stwprocs) * (work.tEnd - work.tMarkTerm)
-	scavAssistCpu := scavenge.assistTime.Load()
-	scavBgCpu := scavenge.backgroundTime.Load()
-
-	// Update cumulative GC CPU stats.
-	work.cpuStats.gcAssistTime += markAssistCpu
-	work.cpuStats.gcDedicatedTime += markDedicatedCpu + markFractionalCpu
-	work.cpuStats.gcIdleTime += markIdleCpu
-	work.cpuStats.gcPauseTime += sweepTermCpu + markTermCpu
-	work.cpuStats.gcTotalTime += sweepTermCpu + markAssistCpu + markDedicatedCpu + markFractionalCpu + markIdleCpu + markTermCpu
-
-	// Update cumulative scavenge CPU stats.
-	work.cpuStats.scavengeAssistTime += scavAssistCpu
-	work.cpuStats.scavengeBgTime += scavBgCpu
-	work.cpuStats.scavengeTotalTime += scavAssistCpu + scavBgCpu
-
-	// Update total CPU.
-	work.cpuStats.totalTime = sched.totaltime + (now-sched.procresizetime)*int64(gomaxprocs)
-	work.cpuStats.idleTime += sched.idleTime.Load()
-
-	// Compute userTime. We compute this indirectly as everything that's not the above.
+	// Accumulate CPU stats.
 	//
-	// Since time spent in _Pgcstop is covered by gcPauseTime, and time spent in _Pidle
-	// is covered by idleTime, what we're left with is time spent in _Prunning and _Psyscall,
-	// the latter of which is fine because the P will either go idle or get used for something
-	// else via sysmon. Meanwhile if we subtract GC time from whatever's left, we get non-GC
-	// _Prunning time. Note that this still leaves time spent in sweeping and in the scheduler,
-	// but that's fine. The overwhelming majority of this time will be actual user time.
-	work.cpuStats.userTime = work.cpuStats.totalTime - (work.cpuStats.gcTotalTime +
-		work.cpuStats.scavengeTotalTime + work.cpuStats.idleTime)
+	// Use maxprocs instead of stwprocs for GC pause time because the total time
+	// computed in the CPU stats is based on maxprocs, and we want them to be
+	// comparable.
+	//
+	// Pass gcMarkPhase=true to accumulate so we can get all the latest GC CPU stats
+	// in there too.
+	work.cpuStats.accumulateGCPauseTime(now-stw.finishedStopping, work.maxprocs)
+	work.cpuStats.accumulate(now, true)
 
 	// Compute overall GC CPU utilization.
 	// Omit idle marking time from the overall utilization here since it's "free".
-	memstats.gc_cpu_fraction = float64(work.cpuStats.gcTotalTime-work.cpuStats.gcIdleTime) / float64(work.cpuStats.totalTime)
+	memstats.gc_cpu_fraction = float64(work.cpuStats.GCTotalTime-work.cpuStats.GCIdleTime) / float64(work.cpuStats.TotalTime)
 
 	// Reset assist time and background time stats.
 	//
@@ -1056,10 +1448,6 @@ func gcMarkTermination() {
 	// Reset idle time stat.
 	sched.idleTime.Store(0)
 
-	// Reset sweep state.
-	sweep.nbgsweep = 0
-	sweep.npausesweep = 0
-
 	if work.userForced {
 		memstats.numforcedgc++
 	}
@@ -1069,6 +1457,12 @@ func gcMarkTermination() {
 	memstats.numgc++
 	injectglist(&work.sweepWaiters.list)
 	unlock(&work.sweepWaiters.lock)
+
+	// Increment the scavenge generation now.
+	//
+	// This moment represents peak heap in use because we're
+	// about to start sweeping.
+	mheap_.pages.scav.index.nextGen()
 
 	// Release the CPU limiter.
 	gcCPULimiter.finishGCTransition(now)
@@ -1082,12 +1476,44 @@ func gcMarkTermination() {
 	// Those aren't tracked in any sweep lists, so we need to
 	// count them against sweep completion until we ensure all
 	// those spans have been forced out.
+	//
+	// If gcSweep fully swept the heap (for example if the sweep
+	// is not concurrent due to a GODEBUG setting), then we expect
+	// the sweepLocker to be invalid, since sweeping is done.
+	//
+	// N.B. Below we might duplicate some work from gcSweep; this is
+	// fine as all that work is idempotent within a GC cycle, and
+	// we're still holding worldsema so a new cycle can't start.
 	sl := sweep.active.begin()
-	if !sl.valid {
+	if !stwSwept && !sl.valid {
 		throw("failed to set sweep barrier")
+	} else if stwSwept && sl.valid {
+		throw("non-concurrent sweep failed to drain all sweep queues")
 	}
 
-	systemstack(func() { startTheWorldWithSema(true) })
+	if work.goroutineLeak.enabled {
+		// Restore the elem and c fields of all sudogs to their original values.
+		gcRestoreSyncObjects()
+	}
+
+	var goroutineLeakDone bool
+	systemstack(func() {
+		// Pull the GC out of goroutine leak detection mode.
+		work.goroutineLeak.enabled = false
+		goroutineLeakDone = work.goroutineLeak.done
+		work.goroutineLeak.done = false
+
+		// The memstats updated above must be updated with the world
+		// stopped to ensure consistency of some values, such as
+		// sched.idleTime and sched.totaltime. memstats also include
+		// the pause time (work,pauseNS), forcing computation of the
+		// total pause time before the pause actually ends.
+		//
+		// Here we reuse the same now for start the world so that the
+		// time added to /sched/pauses/total/gc:seconds will be
+		// consistent with the value in memstats.
+		startTheWorldWithSema(now, stw)
+	})
 
 	// Flush the heap profile so we can start a new cycle next GC.
 	// This is relatively expensive, so we don't do it with the
@@ -1105,14 +1531,40 @@ func gcMarkTermination() {
 	// mcache before allocating, but idle Ps may not. Since this
 	// is necessary to sweep all spans, we need to ensure all
 	// mcaches are flushed before we start the next GC cycle.
-	systemstack(func() {
-		forEachP(func(pp *p) {
-			pp.mcache.prepareForSweep()
-		})
+	//
+	// While we're here, flush the page cache for idle Ps to avoid
+	// having pages get stuck on them. These pages are hidden from
+	// the scavenger, so in small idle heaps a significant amount
+	// of additional memory might be held onto.
+	//
+	// Also, flush the pinner cache, to avoid leaking that memory
+	// indefinitely.
+	if debug.gctrace > 1 {
+		clear(memstats.lastScanStats[:])
+	}
+	forEachP(waitReasonFlushProcCaches, func(pp *p) {
+		pp.mcache.prepareForSweep()
+		if pp.status == _Pidle {
+			systemstack(func() {
+				lock(&mheap_.lock)
+				pp.pcache.flush(&mheap_.pages)
+				unlock(&mheap_.lock)
+			})
+		}
+		if debug.gctrace > 1 {
+			pp.gcw.flushScanStats(&memstats.lastScanStats)
+		}
+		pp.pinnerCache = nil
 	})
-	// Now that we've swept stale spans in mcaches, they don't
-	// count against unswept spans.
-	sweep.active.end(sl)
+	if sl.valid {
+		// Now that we've swept stale spans in mcaches, they don't
+		// count against unswept spans.
+		//
+		// Note: this sweepLocker may not be valid if sweeping had
+		// already completed during the STW. See the corresponding
+		// begin() call that produced sl.
+		sweep.active.end(sl)
+	}
 
 	// Print gctrace before dropping worldsema. As soon as we drop
 	// worldsema another cycle could start and smash the stats
@@ -1124,7 +1576,11 @@ func gcMarkTermination() {
 		printlock()
 		print("gc ", memstats.numgc,
 			" @", string(itoaDiv(sbuf[:], uint64(work.tSweepTerm-runtimeInitTime)/1e6, 3)), "s ",
-			util, "%: ")
+			util, "%")
+		if goroutineLeakDone {
+			print(" (checking for goroutine leaks)")
+		}
+		print(": ")
 		prev := work.tSweepTerm
 		for i, ns := range []int64{work.tMark, work.tMarkTerm, work.tEnd} {
 			if i != 0 {
@@ -1135,11 +1591,11 @@ func gcMarkTermination() {
 		}
 		print(" ms clock, ")
 		for i, ns := range []int64{
-			sweepTermCpu,
+			int64(work.stwprocs) * (work.tMark - work.tSweepTerm),
 			gcController.assistTime.Load(),
 			gcController.dedicatedMarkTime.Load() + gcController.fractionalMarkTime.Load(),
 			gcController.idleMarkTime.Load(),
-			markTermCpu,
+			int64(work.stwprocs) * (work.tEnd - work.tMarkTerm),
 		} {
 			if i == 2 || i == 3 {
 				// Separate mark time components with /.
@@ -1159,7 +1615,40 @@ func gcMarkTermination() {
 			print(" (forced)")
 		}
 		print("\n")
+
+		if debug.gctrace > 1 {
+			dumpScanStats()
+		}
 		printunlock()
+	}
+
+	// Print finalizer/cleanup queue length. Like gctrace, do this before the next GC starts.
+	// The fact that the next GC might start is not that problematic here, but acts as a convenient
+	// lock on printing this information (so it cannot overlap with itself from the next GC cycle).
+	if debug.checkfinalizers > 0 {
+		fq, fe := finReadQueueStats()
+		fn := max(int64(fq)-int64(fe), 0)
+
+		cq, ce := gcCleanups.readQueueStats()
+		cn := max(int64(cq)-int64(ce), 0)
+
+		println("checkfinalizers: queue:", fn, "finalizers +", cn, "cleanups")
+	}
+
+	// Set any arena chunks that were deferred to fault.
+	lock(&userArenaState.lock)
+	faultList := userArenaState.fault
+	userArenaState.fault = nil
+	unlock(&userArenaState.lock)
+	for _, lc := range faultList {
+		lc.mspan.setUserArenaChunkToFault()
+	}
+
+	// Enable huge pages on some metadata if we cross a heap threshold.
+	if gcController.heapGoal() > minHeapForMetadataHugePages {
+		systemstack(func() {
+			mheap_.enableMetadataHugePages()
+		})
 	}
 
 	semrelease(&worldsema)
@@ -1186,11 +1675,34 @@ func gcBgMarkStartWorkers() {
 	//
 	// Worker Gs don't exit if gomaxprocs is reduced. If it is raised
 	// again, we can reuse the old workers; no need to create new workers.
-	for gcBgMarkWorkerCount < gomaxprocs {
-		go gcBgMarkWorker()
+	if gcBgMarkWorkerCount >= gomaxprocs {
+		return
+	}
 
-		notetsleepg(&work.bgMarkReady, -1)
-		noteclear(&work.bgMarkReady)
+	// Increment mp.locks when allocating. We are called within gcStart,
+	// and thus must not trigger another gcStart via an allocation. gcStart
+	// bails when allocating with locks held, so simulate that for these
+	// allocations.
+	//
+	// TODO(prattmic): cleanup gcStart to use a more explicit "in gcStart"
+	// check for bailing.
+	mp := acquirem()
+	ready := make(chan struct{}, 1)
+	releasem(mp)
+
+	for gcBgMarkWorkerCount < gomaxprocs {
+		mp := acquirem() // See above, we allocate a closure here.
+		go gcBgMarkWorker(ready)
+		releasem(mp)
+
+		// N.B. we intentionally wait on each goroutine individually
+		// rather than starting all in a batch and then waiting once
+		// afterwards. By running one goroutine at a time, we can take
+		// advantage of runnext to bounce back and forth between
+		// workers and this goroutine. In an overloaded application,
+		// this can reduce GC start latency by prioritizing these
+		// goroutines rather than waiting on the end of the run queue.
+		<-ready
 		// The worker is now guaranteed to be added to the pool before
 		// its P's next findRunnableGCWorker.
 
@@ -1214,7 +1726,7 @@ func gcBgMarkPrepare() {
 	work.nwait = ^uint32(0)
 }
 
-// gcBgMarkWorker is an entry in the gcBgMarkWorkerPool. It points to a single
+// gcBgMarkWorkerNode is an entry in the gcBgMarkWorkerPool. It points to a single
 // gcBgMarkWorker goroutine.
 type gcBgMarkWorkerNode struct {
 	// Unused workers are managed in a lock-free stack. This field must be first.
@@ -1228,21 +1740,34 @@ type gcBgMarkWorkerNode struct {
 	// gcBgMarkWorker().
 	m muintptr
 }
+type gcBgMarkWorkerNodePadded struct {
+	gcBgMarkWorkerNode
+	pad [tagAlign - unsafe.Sizeof(gcBgMarkWorkerNode{}) - gcBgMarkWorkerNodeRedZoneSize]byte
+}
 
-func gcBgMarkWorker() {
+const gcBgMarkWorkerNodeRedZoneSize = (16 << 2) * asanenabledBit // redZoneSize(512)
+
+func gcBgMarkWorker(ready chan struct{}) {
 	gp := getg()
 
 	// We pass node to a gopark unlock function, so it can't be on
 	// the stack (see gopark). Prevent deadlock from recursively
 	// starting GC by disabling preemption.
 	gp.m.preemptoff = "GC worker init"
-	node := new(gcBgMarkWorkerNode)
+	// TODO: This is technically not allowed in the heap. See comment in tagptr.go.
+	//
+	// It is kept alive simply by virtue of being used in the infinite loop
+	// below. gcBgMarkWorkerPool keeps pointers to nodes that are not
+	// GC-visible, so this must be kept alive indefinitely (even if
+	// GOMAXPROCS decreases).
+	node := &new(gcBgMarkWorkerNodePadded).gcBgMarkWorkerNode
 	gp.m.preemptoff = ""
 
 	node.gp.set(gp)
 
 	node.m.set(acquirem())
-	notewakeup(&work.bgMarkReady)
+
+	ready <- struct{}{}
 	// After this point, the background mark worker is generally scheduled
 	// cooperatively by gcController.findRunnableGCWorker. While performing
 	// work on the P, preemption is disabled because we are working on
@@ -1255,10 +1780,10 @@ func gcBgMarkWorker() {
 	// fine; it will eventually gopark again for further scheduling via
 	// findRunnableGCWorker.
 	//
-	// Since we disable preemption before notifying bgMarkReady, we
-	// guarantee that this G will be in the worker pool for the next
-	// findRunnableGCWorker. This isn't strictly necessary, but it reduces
-	// latency between _GCmark starting and the workers starting.
+	// Since we disable preemption before notifying ready, we guarantee that
+	// this G will be in the worker pool for the next findRunnableGCWorker.
+	// This isn't strictly necessary, but it reduces latency between
+	// _GCmark starting and the workers starting.
 
 	for {
 		// Go to sleep until woken by
@@ -1290,7 +1815,7 @@ func gcBgMarkWorker() {
 			// Note that at this point, the G may immediately be
 			// rescheduled and may be running.
 			return true
-		}, unsafe.Pointer(node), waitReasonGCWorkerIdle, traceEvGoBlock, 0)
+		}, unsafe.Pointer(node), waitReasonGCWorkerIdle, traceBlockSystemGoroutine, 0)
 
 		// Preemption must not occur here, or another G might see
 		// p.gcMarkWorkerMode.
@@ -1317,45 +1842,43 @@ func gcBgMarkWorker() {
 			trackLimiterEvent = pp.limiterEvent.start(limiterEventIdleMarkWork, startTime)
 		}
 
-		decnwait := atomic.Xadd(&work.nwait, -1)
-		if decnwait == work.nproc {
-			println("runtime: work.nwait=", decnwait, "work.nproc=", work.nproc)
-			throw("work.nwait was > work.nproc")
-		}
+		gcBeginWork()
 
 		systemstack(func() {
-			// Mark our goroutine preemptible so its stack
-			// can be scanned. This lets two mark workers
-			// scan each other (otherwise, they would
-			// deadlock). We must not modify anything on
-			// the G stack. However, stack shrinking is
-			// disabled for mark workers, so it is safe to
-			// read from the G stack.
-			casGToWaiting(gp, _Grunning, waitReasonGCWorkerActive)
+			// Mark our goroutine preemptible so its stack can be scanned or observed
+			// by the execution tracer. This, for example, lets two mark workers scan
+			// each other (otherwise, they would deadlock).
+			//
+			// casGToWaitingForSuspendG marks the goroutine as ineligible for a
+			// stack shrink, effectively pinning the stack in memory for the duration.
+			//
+			// N.B. The execution tracer is not aware of this status transition and
+			// handles it specially based on the wait reason.
+			casGToWaitingForSuspendG(gp, _Grunning, waitReasonGCWorkerActive)
 			switch pp.gcMarkWorkerMode {
 			default:
 				throw("gcBgMarkWorker: unexpected gcMarkWorkerMode")
 			case gcMarkWorkerDedicatedMode:
-				gcDrain(&pp.gcw, gcDrainUntilPreempt|gcDrainFlushBgCredit)
+				gcDrainMarkWorkerDedicated(&pp.gcw, true)
 				if gp.preempt {
 					// We were preempted. This is
 					// a useful signal to kick
 					// everything out of the run
 					// queue so it can run
 					// somewhere else.
-					if drainQ, n := runqdrain(pp); n > 0 {
+					if drainQ := runqdrain(pp); !drainQ.empty() {
 						lock(&sched.lock)
-						globrunqputbatch(&drainQ, int32(n))
+						globrunqputbatch(&drainQ)
 						unlock(&sched.lock)
 					}
 				}
 				// Go back to draining, this time
 				// without preemption.
-				gcDrain(&pp.gcw, gcDrainFlushBgCredit)
+				gcDrainMarkWorkerDedicated(&pp.gcw, false)
 			case gcMarkWorkerFractionalMode:
-				gcDrain(&pp.gcw, gcDrainFractional|gcDrainUntilPreempt|gcDrainFlushBgCredit)
+				gcDrainMarkWorkerFractional(&pp.gcw)
 			case gcMarkWorkerIdleMode:
-				gcDrain(&pp.gcw, gcDrainIdle|gcDrainUntilPreempt|gcDrainFlushBgCredit)
+				gcDrainMarkWorkerIdle(&pp.gcw)
 			}
 			casgstatus(gp, _Gwaiting, _Grunning)
 		})
@@ -1368,27 +1891,18 @@ func gcBgMarkWorker() {
 			pp.limiterEvent.stop(limiterEventIdleMarkWork, now)
 		}
 		if pp.gcMarkWorkerMode == gcMarkWorkerFractionalMode {
-			atomic.Xaddint64(&pp.gcFractionalMarkTime, duration)
-		}
-
-		// Was this the last worker and did we run out
-		// of work?
-		incnwait := atomic.Xadd(&work.nwait, +1)
-		if incnwait > work.nproc {
-			println("runtime: p.gcMarkWorkerMode=", pp.gcMarkWorkerMode,
-				"work.nwait=", incnwait, "work.nproc=", work.nproc)
-			throw("work.nwait > work.nproc")
+			pp.gcFractionalMarkTime.Add(duration)
 		}
 
 		// We'll releasem after this point and thus this P may run
 		// something else. We must clear the worker mode to avoid
 		// attributing the mode to a different (non-worker) G in
-		// traceGoStart.
+		// tracev2.GoStart.
 		pp.gcMarkWorkerMode = gcMarkWorkerNotWorker
 
 		// If this worker reached a background mark completion
 		// point, signal the main GC goroutine.
-		if incnwait == work.nproc && !gcMarkWorkAvailable(nil) {
+		if gcEndWork() {
 			// We don't need the P-local buffers here, allow
 			// preemption because we may schedule like a regular
 			// goroutine in gcMarkDone (block on locks, etc).
@@ -1400,38 +1914,54 @@ func gcBgMarkWorker() {
 	}
 }
 
-// gcMarkWorkAvailable reports whether executing a mark worker
-// on p is potentially useful. p may be nil, in which case it only
-// checks the global sources of work.
-func gcMarkWorkAvailable(p *p) bool {
+// gcShouldScheduleWorker reports whether executing a mark worker
+// on p is potentially useful. p may be nil.
+func gcShouldScheduleWorker(p *p) bool {
 	if p != nil && !p.gcw.empty() {
 		return true
 	}
-	if !work.full.empty() {
-		return true // global work available
+	return gcMarkWorkAvailable()
+}
+
+// gcIsMarkDone reports whether the mark phase is (probably) done.
+func gcIsMarkDone() bool {
+	return work.nwait == work.nproc && !gcMarkWorkAvailable()
+}
+
+// gcBeginWork signals to the garbage collector that a new worker is
+// about to process GC work.
+func gcBeginWork() {
+	decnwait := atomic.Xadd(&work.nwait, -1)
+	if decnwait == work.nproc {
+		println("runtime: work.nwait=", decnwait, "work.nproc=", work.nproc)
+		throw("work.nwait was > work.nproc")
 	}
-	if work.markrootNext < work.markrootJobs {
-		return true // root scan work available
+}
+
+// gcEndWork signals to the garbage collector that a new worker has just finished
+// its work. It reports whether it was the last worker and there's no more work
+// to do. If it returns true, the caller must call gcMarkDone.
+func gcEndWork() (last bool) {
+	incnwait := atomic.Xadd(&work.nwait, +1)
+	if incnwait > work.nproc {
+		println("runtime: work.nwait=", incnwait, "work.nproc=", work.nproc)
+		throw("work.nwait > work.nproc")
 	}
-	return false
+	return incnwait == work.nproc && !gcMarkWorkAvailable()
 }
 
 // gcMark runs the mark (or, for concurrent GC, mark termination)
 // All gcWork caches must be empty.
 // STW is in effect at this point.
 func gcMark(startTime int64) {
-	if debug.allocfreetrace > 0 {
-		tracegc()
-	}
-
 	if gcphase != _GCmarktermination {
 		throw("in gcMark expecting to see gcphase as _GCmarktermination")
 	}
 	work.tstart = startTime
 
 	// Check that there's no marking work remaining.
-	if work.full != 0 || work.markrootNext < work.markrootJobs {
-		print("runtime: full=", hex(work.full), " next=", work.markrootNext, " jobs=", work.markrootJobs, " nDataRoots=", work.nDataRoots, " nBSSRoots=", work.nBSSRoots, " nSpanRoots=", work.nSpanRoots, " nStackRoots=", work.nStackRoots, "\n")
+	if next, jobs := work.markrootNext.Load(), work.markrootJobs.Load(); work.full != 0 || next < jobs {
+		print("runtime: full=", hex(work.full), " next=", next, " jobs=", jobs, " nDataRoots=", work.nDataRoots, " nBSSRoots=", work.nBSSRoots, " nSpanRoots=", work.nSpanRoots, " nStackRoots=", work.nStackRoots, "\n")
 		panic("non-empty mark queue after concurrent mark")
 	}
 
@@ -1439,9 +1969,6 @@ func gcMark(startTime int64) {
 		// This is expensive when there's a large number of
 		// Gs, so only do it if checkmark is also enabled.
 		gcMarkRootCheck()
-	}
-	if work.full != 0 {
-		throw("work.full != 0")
 	}
 
 	// Drop allg snapshot. allgs may have grown, in which case
@@ -1514,10 +2041,12 @@ func gcMark(startTime int64) {
 // gcSweep must be called on the system stack because it acquires the heap
 // lock. See mheap for details.
 //
+// Returns true if the heap was fully swept by this function.
+//
 // The world must be stopped.
 //
 //go:systemstack
-func gcSweep(mode gcMode) {
+func gcSweep(mode gcMode) bool {
 	assertWorldStopped()
 
 	if gcphase != _GCoff {
@@ -1528,33 +2057,37 @@ func gcSweep(mode gcMode) {
 	mheap_.sweepgen += 2
 	sweep.active.reset()
 	mheap_.pagesSwept.Store(0)
-	mheap_.sweepArenas = mheap_.allArenas
+	mheap_.sweepArenas = mheap_.heapArenas
 	mheap_.reclaimIndex.Store(0)
 	mheap_.reclaimCredit.Store(0)
 	unlock(&mheap_.lock)
 
 	sweep.centralIndex.clear()
 
-	if !_ConcurrentSweep || mode == gcForceBlockMode {
+	if !concurrentSweep || mode == gcForceBlockMode {
 		// Special case synchronous sweep.
 		// Record that no proportional sweeping has to happen.
 		lock(&mheap_.lock)
 		mheap_.sweepPagesPerByte = 0
 		unlock(&mheap_.lock)
+		// Flush all mcaches.
+		for _, pp := range allp {
+			pp.mcache.prepareForSweep()
+		}
 		// Sweep all spans eagerly.
 		for sweepone() != ^uintptr(0) {
-			sweep.npausesweep++
 		}
-		// Free workbufs eagerly.
+		// Free workbufs and span rings eagerly.
 		prepareFreeWorkbufs()
 		for freeSomeWbufs(false) {
 		}
+		freeDeadSpanSPMCs()
 		// All "free" events for this mark/sweep cycle have
 		// now happened, so we can make this profile cycle
 		// available immediately.
 		mProf_NextCycle()
 		mProf_Flush()
-		return
+		return true
 	}
 
 	// Background sweep.
@@ -1564,6 +2097,7 @@ func gcSweep(mode gcMode) {
 		ready(sweep.g, 0, true)
 	}
 	unlock(&sweep.lock)
+	return false
 }
 
 // gcResetMarkState resets global state prior to marking (concurrent
@@ -1587,13 +2121,11 @@ func gcResetMarkState() {
 	// Clear page marks. This is just 1MB per 64GB of heap, so the
 	// time here is pretty trivial.
 	lock(&mheap_.lock)
-	arenas := mheap_.allArenas
+	arenas := mheap_.heapArenas
 	unlock(&mheap_.lock)
 	for _, ai := range arenas {
 		ha := mheap_.arenas[ai.l1()][ai.l2()]
-		for i := range ha.pageMarks {
-			ha.pageMarks[i] = 0
-		}
+		clear(ha.pageMarks[:])
 	}
 
 	work.bytesMarked = 0
@@ -1605,6 +2137,15 @@ func gcResetMarkState() {
 var poolcleanup func()
 var boringCaches []unsafe.Pointer // for crypto/internal/boring
 
+// sync_runtime_registerPoolCleanup should be an internal detail,
+// but widely used packages access it using linkname.
+// Notable members of the hall of shame include:
+//   - github.com/bytedance/gopkg
+//   - github.com/songzhibin97/gkit
+//
+// Do not remove or change the type signature.
+// See go.dev/issue/67401.
+//
 //go:linkname sync_runtime_registerPoolCleanup sync.runtime_registerPoolCleanup
 func sync_runtime_registerPoolCleanup(f func()) {
 	poolcleanup = f
@@ -1731,7 +2272,7 @@ func gcTestIsReachable(ptrs ...unsafe.Pointer) (mask uint64) {
 		s := (*specialReachable)(mheap_.specialReachableAlloc.alloc())
 		unlock(&mheap_.speciallock)
 		s.special.kind = _KindSpecialReachable
-		if !addspecial(p, &s.special) {
+		if !addspecial(p, &s.special, false) {
 			throw("already have a reachable special (duplicate pointer?)")
 		}
 		specials[i] = s

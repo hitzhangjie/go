@@ -1751,7 +1751,7 @@ var marshalIndentTests = []struct {
 		},
 		Prefix:    "",
 		Indent:    "\t",
-		ExpectXML: fmt.Sprintf("<agent handle=\"007\">\n\t<Identity>James Bond</Identity><redacted/>\n</agent>"),
+		ExpectXML: "<agent handle=\"007\">\n\t<Identity>James Bond</Identity><redacted/>\n</agent>",
 	},
 }
 
@@ -2561,7 +2561,6 @@ var closeTests = []struct {
 
 func TestClose(t *testing.T) {
 	for _, tt := range closeTests {
-		tt := tt
 		t.Run(tt.desc, func(t *testing.T) {
 			var out strings.Builder
 			enc := NewEncoder(&out)
