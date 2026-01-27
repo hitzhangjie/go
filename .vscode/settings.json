@@ -8,6 +8,7 @@
     // envvars passed to the tools
     "go.toolsEnvVars": {
         "GOENV": "/home/zhangjie/github/golang/go/go.env",
+        "GOEXPERIMENT": "nosynchashtriemap",
     },
     // `go: install/update the tools`, the tools path
     "go.toolsGopath": "/home/zhangjie/github/golang/gopath",
@@ -21,5 +22,6 @@
         "**/Thumbs.db": true,
         "bin": true,
         "pkg": true,
-    }
+    },
+    "gopls": {}
 }
